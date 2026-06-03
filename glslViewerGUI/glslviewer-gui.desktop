@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=GlslViewerGUI
+Comment=Shader Mission Control for glslViewer
+Exec=glslviewer-gui
+Icon=video-display
+Type=Application
+Terminal=false
+Categories=Graphics;Development;
+MimeType=text/x-glsl;

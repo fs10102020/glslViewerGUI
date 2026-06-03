@@ -1,0 +1,6 @@
+#!/bin/sh
+# GlslViewerGUI launcher
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
+exec python3 "${SCRIPT_DIR}/main.py" "$@"
