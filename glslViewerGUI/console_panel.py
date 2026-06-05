@@ -1,19 +1,13 @@
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QTextCursor
-from PyQt6.QtWidgets import QDockWidget, QTextEdit, QWidget, QVBoxLayout, QPushButton
+from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtWidgets import QTextEdit, QWidget, QVBoxLayout, QPushButton
 
 
-class ConsolePanel(QDockWidget):
+class ConsolePanel(QWidget):
     def __init__(self, parent=None):
-        super().__init__("Console", parent)
+        super().__init__(parent)
         self.setObjectName("ConsolePanel")
-        self.setAllowedAreas(
-            Qt.DockWidgetArea.BottomDockWidgetArea |
-            Qt.DockWidgetArea.TopDockWidgetArea
-        )
 
-        content = QWidget()
-        layout = QVBoxLayout(content)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
 
         self._output = QTextEdit()
@@ -25,8 +19,6 @@ class ConsolePanel(QDockWidget):
         self._clear_btn = QPushButton("Clear")
         self._clear_btn.clicked.connect(self._output.clear)
         layout.addWidget(self._clear_btn)
-
-        self.setWidget(content)
 
     def append(self, text: str) -> None:
         scrollbar = self._output.verticalScrollBar()

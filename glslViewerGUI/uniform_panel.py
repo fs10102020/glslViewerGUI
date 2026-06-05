@@ -1,9 +1,9 @@
 import json
 import os
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
-    QDockWidget, QWidget, QVBoxLayout, QFormLayout,
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QFormLayout,
     QDoubleSpinBox, QSpinBox, QCheckBox, QHBoxLayout,
     QScrollArea, QPushButton, QLabel, QFileDialog,
     QMessageBox,
@@ -11,19 +11,14 @@ from PyQt6.QtWidgets import (
 from shader_parser import parse_uniforms
 
 
-class UniformPanel(QDockWidget):
-    uniform_changed = pyqtSignal(str, object)
+class UniformPanel(QWidget):
+    uniform_changed = Signal(str, object)
 
     def __init__(self, parent=None):
-        super().__init__("Uniforms", parent)
+        super().__init__(parent)
         self.setObjectName("UniformPanel")
-        self.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea |
-            Qt.DockWidgetArea.RightDockWidgetArea
-        )
 
-        outer = QWidget()
-        outer_layout = QVBoxLayout(outer)
+        outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(4, 4, 4, 4)
         outer_layout.setSpacing(4)
 
@@ -46,7 +41,6 @@ class UniformPanel(QDockWidget):
         scroll.setWidget(self._container)
         outer_layout.addWidget(scroll)
 
-        self.setWidget(outer)
         self._widgets: dict[str, QWidget] = {}
 
     def load_from_source(self, source: str) -> None:

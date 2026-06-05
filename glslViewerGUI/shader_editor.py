@@ -1,9 +1,9 @@
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import (
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import (
     QFont, QColor, QTextCharFormat, QSyntaxHighlighter,
     QTextCursor, QTextBlockFormat, QKeyEvent,
 )
-from PyQt6.QtWidgets import QPlainTextEdit, QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QLabel
+from PySide6.QtWidgets import QPlainTextEdit, QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QLabel
 
 from error_parser import parse_errors
 
@@ -130,8 +130,8 @@ class GLSLHighlighter(QSyntaxHighlighter):
 
 
 class GLSLEditor(QWidget):
-    text_saved = pyqtSignal(str)
-    errors_changed = pyqtSignal(list)
+    text_saved = Signal(str)
+    errors_changed = Signal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)

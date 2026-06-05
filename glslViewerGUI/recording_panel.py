@@ -1,28 +1,23 @@
 import os
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
-    QDockWidget, QWidget, QVBoxLayout, QHBoxLayout,
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QDoubleSpinBox, QSpinBox,
     QFileDialog, QProgressBar, QGroupBox, QMessageBox,
 )
 
 
-class RecordingPanel(QDockWidget):
-    screenshot_requested = pyqtSignal(str)
-    sequence_requested = pyqtSignal(str, float, float, float)
-    record_requested = pyqtSignal(str, float, float, float)
+class RecordingPanel(QWidget):
+    screenshot_requested = Signal(str)
+    sequence_requested = Signal(str, float, float, float)
+    record_requested = Signal(str, float, float, float)
 
     def __init__(self, parent=None):
-        super().__init__("Recording", parent)
+        super().__init__(parent)
         self.setObjectName("RecordingPanel")
-        self.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea |
-            Qt.DockWidgetArea.RightDockWidgetArea
-        )
 
-        outer = QWidget()
-        layout = QVBoxLayout(outer)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(12)
 
@@ -132,8 +127,6 @@ class RecordingPanel(QDockWidget):
         layout.addWidget(self._status)
 
         layout.addStretch()
-        self.setWidget(outer)
-
         self._seq_dir: str | None = None
         self._vid_file: str | None = None
 

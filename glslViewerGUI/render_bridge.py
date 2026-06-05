@@ -1,20 +1,21 @@
 import os
 import time
-from PyQt6.QtCore import QProcess, QFileSystemWatcher, pyqtSignal, QObject, QTimer
+from PySide6.QtCore import QProcess, QFileSystemWatcher, Signal, QObject, QTimer
 
 from glslViewer_config import GLSLVIEWER_BIN
-from shader_parser import build_uniform_command
+from commands import build_uniform
+from session_config import RenderSessionConfig, ShaderProgramSpec
 
 
 class RenderBridge(QObject):
-    stdout_received = pyqtSignal(str)
-    stderr_received = pyqtSignal(str)
-    process_started = pyqtSignal()
-    process_stopped = pyqtSignal()
-    process_crashed = pyqtSignal(int, int)  # exit_code, exit_status
-    process_exited_normally = pyqtSignal()
-    process_gave_up = pyqtSignal()
-    recording_progress = pyqtSignal(float)
+    stdout_received = Signal(str)
+    stderr_received = Signal(str)
+    process_started = Signal()
+    process_stopped = Signal()
+    process_crashed = Signal(int, int)  # exit_code, exit_status
+    process_exited_normally = Signal()
+    process_gave_up = Signal()
+    recording_progress = Signal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,6 +25,8 @@ class RenderBridge(QObject):
         self._vert_path: str | None = None
         self._geom_path: str | None = None
         self._shader_source: str = ""
+        self._program = ShaderProgramSpec()
+        self._session_config = RenderSessionConfig()
 
         self._crash_count = 0
         self._last_crash_time = 0.0
@@ -45,6 +48,14 @@ class RenderBridge(QObject):
     def geom_path(self) -> str | None:
         return self._geom_path
 
+    @property
+    def program(self) -> ShaderProgramSpec:
+        return self._program
+
+    @property
+    def session_config(self) -> RenderSessionConfig:
+        return self._session_config
+
     def start(self, shader_path: str | None = None, vert_path: str | None = None, geom_path: str | None = None) -> None:
         if self.is_running:
             self.stop()
@@ -52,6 +63,10 @@ class RenderBridge(QObject):
         self._shader_path = shader_path
         self._vert_path = vert_path
         self._geom_path = geom_path
+        self._program = ShaderProgramSpec(frag_path=shader_path, vert_path=vert_path, model_path=geom_path)
+        self._session_config.frag_path = shader_path
+        self._session_config.vert_path = vert_path
+        self._session_config.geom_path = geom_path
         if shader_path and os.path.exists(shader_path):
             with open(shader_path) as f:
                 self._shader_source = f.read()
@@ -62,13 +77,7 @@ class RenderBridge(QObject):
         self._proc.readyReadStandardError.connect(self._on_stderr)
         self._proc.finished.connect(self._on_finished)
 
-        args = ["--noncurses", "--fullFps"]
-        if shader_path and os.path.exists(shader_path):
-            args.append(shader_path)
-        if vert_path and os.path.exists(vert_path):
-            args.append(vert_path)
-        if geom_path and os.path.exists(geom_path):
-            args.append(geom_path)
+        args = self._session_config.build_args()
 
         self._proc.start(GLSLVIEWER_BIN, args)
 
@@ -102,12 +111,16 @@ class RenderBridge(QObject):
             self._proc.write(full.encode("utf-8"))
 
     def set_uniform(self, name: str, value) -> None:
-        cmd = build_uniform_command(name, value)
+        cmd = build_uniform(name, value)
         self.send_command(cmd)
 
     def set_uniform_raw(self, name: str, *values: float) -> None:
         parts = ",".join(str(v) for v in values)
-        self.send_command(f"uniform,{name},{parts}")
+        self.send_command(f"{name},{parts}")
+
+    def apply_session_config(self, config: RenderSessionConfig) -> None:
+        self._session_config = config
+        self.start(config.frag_path, config.vert_path, config.geom_path)
 
     def load_shader(self, path: str, vert_path: str | None = None, geom_path: str | None = None) -> None:
         if not os.path.exists(path):

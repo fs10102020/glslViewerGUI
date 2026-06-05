@@ -1,12 +1,12 @@
 # GlslViewerGUI — Shader Mission Control
 
-A PyQt6 desktop GUI that wraps [glslViewer](https://github.com/patriciogonzalezvivo/glslViewer), providing a live shader editor, uniform controls, camera manipulation, recording tools, and preset management.
+A PySide6 desktop GUI that wraps [glslViewer](https://github.com/patriciogonzalezvivo/glslViewer), providing a live shader editor, uniform controls, camera manipulation, recording tools, and preset management.
 
 
 ## Requirements
 
 - Python 3.10+
-- PyQt6 (`pip install PyQt6`)
+- PySide6 (`uv pip install -r requirements.txt`)
 - glslViewer binary built at `../glslViewer/build/glslViewer`
 
 ## Quick Start

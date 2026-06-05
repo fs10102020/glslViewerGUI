@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPalette, QColor
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtGui import QPalette, QColor
+from PySide6.QtWidgets import QApplication
 
 
 @dataclass
@@ -167,7 +166,7 @@ _THEMES: dict[str, Theme] = {
 
 
 def get_theme(name: str) -> Theme:
-    return _THEMES.get(name, _THEMES["system"])
+    return _THEMES.get(name, _THEMES["dark"])
 
 
 def apply_theme(widget, theme_name: str) -> None:

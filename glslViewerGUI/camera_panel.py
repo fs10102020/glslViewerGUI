@@ -1,24 +1,19 @@
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
-    QDockWidget, QWidget, QVBoxLayout, QFormLayout,
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QFormLayout,
     QDoubleSpinBox, QSpinBox, QComboBox, QPushButton,
-    QHBoxLayout, QLabel, QGroupBox,
+    QHBoxLayout, QLabel, QGroupBox, QLineEdit,
 )
 
 
-class CameraPanel(QDockWidget):
-    camera_command = pyqtSignal(str)
+class CameraPanel(QWidget):
+    camera_command = Signal(str)
 
     def __init__(self, parent=None):
-        super().__init__("Camera", parent)
+        super().__init__(parent)
         self.setObjectName("CameraPanel")
-        self.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea |
-            Qt.DockWidgetArea.RightDockWidgetArea
-        )
 
-        scroll = QWidget()
-        layout = QVBoxLayout(scroll)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(10)
 
@@ -47,11 +42,18 @@ class CameraPanel(QDockWidget):
             lambda t: self.camera_command.emit(f"camera_type,{t}")
         )
 
+        self._cam_name = QLineEdit()
+        self._cam_name.setPlaceholderText("default")
+        self._cam_name.returnPressed.connect(
+            lambda: self.camera_command.emit(f"camera,{self._cam_name.text().strip()}")
+        )
+
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.addRow("Distance:", self._distance)
         form.addRow("FOV:", self._fov)
         form.addRow("Projection:", self._proj)
+        form.addRow("Name:", self._cam_name)
         layout.addLayout(form)
 
         # Position
@@ -106,8 +108,26 @@ class CameraPanel(QDockWidget):
             move_grid.addWidget(btn)
         layout.addWidget(move_group)
 
+        exposure_group = QGroupBox("Exposure")
+        exposure_layout = QHBoxLayout(exposure_group)
+        self._exp_aper = self._make_spinbox()
+        self._exp_aper.setValue(5.6)
+        self._exp_shutter = self._make_spinbox()
+        self._exp_shutter.setValue(125.0)
+        self._exp_iso = self._make_spinbox()
+        self._exp_iso.setValue(100.0)
+        exposure_layout.addWidget(QLabel("Aperture"))
+        exposure_layout.addWidget(self._exp_aper)
+        exposure_layout.addWidget(QLabel("Shutter"))
+        exposure_layout.addWidget(self._exp_shutter)
+        exposure_layout.addWidget(QLabel("ISO"))
+        exposure_layout.addWidget(self._exp_iso)
+        btn_exp = QPushButton("Set")
+        btn_exp.clicked.connect(self._set_exposure)
+        exposure_layout.addWidget(btn_exp)
+        layout.addWidget(exposure_group)
+
         layout.addStretch()
-        self.setWidget(scroll)
 
     def _make_spinbox(self):
         sp = QDoubleSpinBox()
@@ -127,6 +147,11 @@ class CameraPanel(QDockWidget):
         y = self._look_y.value()
         z = self._look_z.value()
         self.camera_command.emit(f"camera_look_at,{x},{y},{z}")
+
+    def _set_exposure(self) -> None:
+        self.camera_command.emit(
+            f"camera_exposure,{self._exp_aper.value()},{self._exp_shutter.value()},{self._exp_iso.value()}"
+        )
 
     def get_state(self) -> dict:
         return {

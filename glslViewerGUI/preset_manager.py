@@ -1,9 +1,9 @@
 import json
 import os
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
-    QDockWidget, QWidget, QVBoxLayout, QHBoxLayout,
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QPushButton, QInputDialog, QMessageBox,
 )
 
@@ -43,20 +43,15 @@ def delete_preset(name: str) -> None:
         os.remove(path)
 
 
-class PresetPanel(QDockWidget):
-    preset_loaded = pyqtSignal(str, dict)
-    preset_saved = pyqtSignal(str)
+class PresetPanel(QWidget):
+    preset_loaded = Signal(str, dict)
+    preset_saved = Signal(str)
 
     def __init__(self, parent=None):
-        super().__init__("Presets", parent)
+        super().__init__(parent)
         self.setObjectName("PresetPanel")
-        self.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea |
-            Qt.DockWidgetArea.RightDockWidgetArea
-        )
 
-        outer = QWidget()
-        layout = QVBoxLayout(outer)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
@@ -80,7 +75,6 @@ class PresetPanel(QDockWidget):
         btns.addWidget(self._rename_btn)
         layout.addLayout(btns)
 
-        self.setWidget(outer)
         self.refresh()
 
     def refresh(self) -> None:

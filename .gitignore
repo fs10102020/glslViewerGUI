@@ -22,6 +22,9 @@ Thumbs.db
 *.so
 *.a
 
+# Local renderer checkout; users download/build glslViewer themselves
+/glslViewer/
+
 # Temporary runtime files
 *.tmp
 *.bak
