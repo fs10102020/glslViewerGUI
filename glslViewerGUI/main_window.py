@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QScrollArea,
+    QSizePolicy,
     QTabWidget,
     QToolBar,
 )
@@ -60,6 +61,15 @@ class MainWindow(QMainWindow):
         self._bridge.stderr_received.connect(self._on_stderr)
         self._bridge.process_crashed.connect(self._on_process_crashed)
         self._bridge.process_gave_up.connect(self._on_process_gave_up)
+
+        self.setDockNestingEnabled(True)
+        self.setDockOptions(
+            QMainWindow.DockOption.AnimatedDocks
+            | QMainWindow.DockOption.AllowTabbedDocks
+            | QMainWindow.DockOption.AllowNestedDocks
+        )
+        self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.BottomDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.BottomDockWidgetArea)
 
         self._build_menus()
         self._build_toolbar()
@@ -198,25 +208,33 @@ class MainWindow(QMainWindow):
         self._inspector_panel.query_requested.connect(lambda cmd, payload: self._safe_send(cmd))
 
         self._right_tabs = QTabWidget(self)
-        self._right_tabs.addTab(self._uniform_panel, "Uniforms")
-        self._right_tabs.addTab(self._camera_panel, "Camera")
-        self._right_tabs.addTab(self._runtime_panel, "Runtime")
+        self._right_tabs.setMinimumWidth(0)
+        self._right_tabs.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self._right_tabs.addTab(self._scroll_panel(self._uniform_panel), "Uniforms")
+        self._right_tabs.addTab(self._scroll_panel(self._camera_panel), "Camera")
+        self._right_tabs.addTab(self._scroll_panel(self._runtime_panel), "Runtime")
 
         assets_tabs = QTabWidget(self)
-        assets_tabs.addTab(self._assets_panel, "Assets")
-        assets_tabs.addTab(self._streams_panel, "Streams")
+        assets_tabs.setMinimumWidth(0)
+        assets_tabs.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        assets_tabs.addTab(self._scroll_panel(self._assets_panel), "Assets")
+        assets_tabs.addTab(self._scroll_panel(self._streams_panel), "Streams")
         self._right_tabs.addTab(assets_tabs, "Assets")
 
         shader_tabs = QTabWidget(self)
-        shader_tabs.addTab(self._defines_panel, "Defines")
-        shader_tabs.addTab(self._include_panel, "Includes")
-        shader_tabs.addTab(self._dependency_panel, "Dependencies")
+        shader_tabs.setMinimumWidth(0)
+        shader_tabs.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        shader_tabs.addTab(self._scroll_panel(self._defines_panel), "Defines")
+        shader_tabs.addTab(self._scroll_panel(self._include_panel), "Includes")
+        shader_tabs.addTab(self._scroll_panel(self._dependency_panel), "Dependencies")
         self._right_tabs.addTab(shader_tabs, "Shader")
 
         pipeline_tabs = QTabWidget(self)
-        pipeline_tabs.addTab(self._pipeline_panel, "Pipeline")
-        pipeline_tabs.addTab(self._scene_panel, "Scene")
-        pipeline_tabs.addTab(self._inspector_panel, "Inspector")
+        pipeline_tabs.setMinimumWidth(0)
+        pipeline_tabs.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        pipeline_tabs.addTab(self._scroll_panel(self._pipeline_panel), "Pipeline")
+        pipeline_tabs.addTab(self._scroll_panel(self._scene_panel), "Scene")
+        pipeline_tabs.addTab(self._scroll_panel(self._inspector_panel), "Inspector")
         self._right_tabs.addTab(pipeline_tabs, "Pipeline")
 
         self._right_dock = QDockWidget("Controls", self)
@@ -245,7 +263,7 @@ class MainWindow(QMainWindow):
         self._recording_dock.setObjectName("RecordingDock")
         self._recording_dock.setWidget(recording_scroll)
         self._recording_dock.setMaximumHeight(16777215)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._recording_dock)
+        self.splitDockWidget(self._console_dock, self._recording_dock, Qt.Orientation.Horizontal)
 
         self._preset_panel = PresetPanel(self)
         self._preset_panel.preset_saved.connect(self._on_preset_saved)
@@ -256,6 +274,19 @@ class MainWindow(QMainWindow):
         self._preset_dock.setMaximumHeight(16777215)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._preset_dock)
         self.tabifyDockWidget(self._recording_dock, self._preset_dock)
+        self._recording_dock.raise_()
+        self.resizeDocks([self._console_dock, self._recording_dock], [1, 2], Qt.Orientation.Horizontal)
+        self.resizeDocks([self._console_dock, self._recording_dock], [160, 160], Qt.Orientation.Vertical)
+
+    def _scroll_panel(self, panel):
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumWidth(0)
+        scroll.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        scroll.setWidget(panel)
+        panel.setMinimumWidth(0)
+        panel.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        return scroll
 
     def _safe_send(self, command: str) -> None:
         if command:

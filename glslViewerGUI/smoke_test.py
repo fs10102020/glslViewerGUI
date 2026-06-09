@@ -7,7 +7,7 @@ sys.path.insert(0, os.getcwd())
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from PySide6.QtWidgets import QApplication, QWidget, QTabWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QScrollArea, QWidget, QTabWidget
 
 app = QApplication(sys.argv)
 
@@ -103,9 +103,18 @@ assert hasattr(win._camera_panel, "_exp_aper"), "CameraPanel missing _exp_aper"
 
 # Verify theme was applied (amber accent)
 from PySide6.QtCore import QSettings
+from themes import get_theme, apply_theme
 settings = QSettings("glslViewer", "GlslViewerGUI")
 theme = settings.value("theme", "dark")
 assert theme in ("dark", "light", "system"), f"Unexpected theme: {theme}"
+
+dark_qss = get_theme("dark").qss
+for selector in ["QMenuBar", "QPushButton", "QDockWidget::title", "QTabBar::tab:selected", "QProgressBar::chunk"]:
+    assert selector in dark_qss, f"Dark theme missing selector: {selector}"
+
+apply_theme(win, "dark")
+assert "#1e1e1e" in win._frag_editor._editor.styleSheet(), "Fragment editor did not receive dark theme"
+assert "#1e1e1e" in win._vert_editor._editor.styleSheet(), "Vertex editor did not receive dark theme"
 
 # Verify window size and constraints
 assert win.width() >= 1400 and win.height() >= 900, f"Window too small: {win.width()}x{win.height()}"
@@ -117,13 +126,18 @@ assert win._recording_dock.maximumHeight() >= 1000, f"Recording max height too r
 assert win._preset_dock.maximumHeight() >= 1000, f"Presets max height too restrictive: {win._preset_dock.maximumHeight()}"
 
 # Verify recording dock is wrapped in scroll area
-from PySide6.QtWidgets import QScrollArea
 rec_scroll = win._recording_dock.widget()
 assert isinstance(rec_scroll, QScrollArea), f"Recording dock widget should be QScrollArea, got {type(rec_scroll)}"
+
+# Verify dock layout is resizable and nested explicitly
+assert win.dockOptions() & QMainWindow.DockOption.AllowNestedDocks, "Nested docks must be enabled for bottom split resizing"
+assert win.tabifiedDockWidgets(win._recording_dock) == [win._preset_dock], "Presets should be tabified with Recording"
 
 # Verify right dock has no restrictive maximum width
 assert win._right_dock.maximumWidth() >= 1000, f"Right dock max width too restrictive: {win._right_dock.maximumWidth()}"
 assert win._right_dock.minimumWidth() == 220, f"Right dock min width wrong: {win._right_dock.minimumWidth()}"
+assert win._right_dock.minimumSizeHint().width() <= 260, f"Right dock min size hint too wide: {win._right_dock.minimumSizeHint().width()}"
+assert isinstance(win._right_tabs.widget(1), QScrollArea), "Camera tab should be scroll-wrapped to avoid width pressure"
 
 # Verify ShaderProgramSpec works
 prog = ShaderProgramSpec(frag_path="/tmp/test.frag", vert_path="/tmp/test.vert")
