@@ -54,6 +54,7 @@ class PipelinePanel(QWidget):
         mp_form.addWidget(QLabel("Type:"), 0, 0)
         self._mp_type = QComboBox()
         self._mp_type.addItems(["BUFFER", "DOUBLE_BUFFER", "PYRAMID", "FLOOD"])
+        self._mp_type.setToolTip("Buffer pass defines should normally come from #ifdef blocks in shader source.")
         mp_form.addWidget(self._mp_type, 0, 1, 1, 2)
         mp_form.addWidget(QLabel("Index:"), 1, 0)
         self._mp_idx = QSpinBox()
@@ -63,13 +64,15 @@ class PipelinePanel(QWidget):
         self._mp_val = QLineEdit()
         self._mp_val.setPlaceholderText("optional")
         mp_form.addWidget(self._mp_val, 2, 1)
-        mp_add = QPushButton("Add")
+        mp_add = QPushButton("Add global define")
         mp_add.setMaximumWidth(70)
+        mp_add.setToolTip("Advanced: global pass defines can conflict with backend-managed pass shaders.")
         mp_add.clicked.connect(self._on_mp_define)
         mp_form.addWidget(mp_add, 2, 2)
         layout.addWidget(mp_group)
 
         scene_group = QGroupBox("Scene Toggles")
+        self._scene_toggles = []
         scene_grid = QGridLayout(scene_group)
         for i, (label, cmd_true, cmd_false) in enumerate([
             ("Floor", build_floor(True), build_floor(False)),
@@ -79,6 +82,7 @@ class PipelinePanel(QWidget):
         ]):
             cb = QCheckBox(label)
             cb.toggled.connect(lambda v, _t=cmd_true, _f=cmd_false: self.command_requested.emit(_t if v else _f))
+            self._scene_toggles.append(cb)
             scene_grid.addWidget(cb, i // 2, i % 2)
         layout.addWidget(scene_group)
 
@@ -88,3 +92,8 @@ class PipelinePanel(QWidget):
         name = f"{self._mp_type.currentText()}_{self._mp_idx.value()}"
         value = self._mp_val.text().strip()
         self.define_requested.emit(name, value)
+
+    def set_scene_enabled(self, enabled: bool) -> None:
+        for toggle in self._scene_toggles:
+            toggle.setEnabled(enabled)
+            toggle.setToolTip("" if enabled else "Scene controls require a vertex shader or model.")

@@ -133,6 +133,8 @@ class RecordingPanel(QWidget):
     def set_progress(self, pct: float) -> None:
         self._progress.setValue(int(pct * 100))
         self._status.setText(f"Recording\u2026 {int(pct * 100)}%")
+        if pct >= 1.0:
+            self.set_busy(False)
 
     def reset_progress(self) -> None:
         self._progress.setValue(0)
@@ -166,6 +168,9 @@ class RecordingPanel(QWidget):
         if not self._seq_dir:
             QMessageBox.warning(self, "Sequence", "Please choose an output directory first.")
             return
+        if self._seq_from.value() >= self._seq_to.value():
+            QMessageBox.warning(self, "Sequence", "The start time must be before the end time.")
+            return
         prefix = os.path.join(self._seq_dir, "frame_")
         self.set_busy(True)
         self.sequence_requested.emit(
@@ -188,6 +193,9 @@ class RecordingPanel(QWidget):
     def _on_start_video(self) -> None:
         if not self._vid_file:
             QMessageBox.warning(self, "Video", "Please choose an output file first.")
+            return
+        if self._vid_from.value() >= self._vid_to.value():
+            QMessageBox.warning(self, "Video", "The start time must be before the end time.")
             return
         self.set_busy(True)
         self.record_requested.emit(

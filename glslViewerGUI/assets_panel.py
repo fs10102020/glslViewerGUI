@@ -5,7 +5,17 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QGroupBox, QLineEdit,
     QFileDialog, QListWidget, QMessageBox, QCheckBox,
 )
-from session_config import AssetSpec
+from session_config import (
+    AssetSpec,
+    ASSET_NAMED_TEXTURE,
+    ASSET_STREAM_TEXTURE,
+    ASSET_CUBEMAP_SHOW,
+    ASSET_CUBEMAP_ENV,
+    ASSET_AUDIO,
+    ASSET_MODEL,
+    ASSET_SEQUENCE_UNIFORM,
+    ASSET_CAMERA_SEQUENCE,
+)
 
 
 class AssetsPanel(QWidget):
@@ -198,38 +208,53 @@ class AssetsPanel(QWidget):
         if not path:
             return
         if self._tex_webcam.isChecked():
-            spec = AssetSpec(kind="video", name=name, path=path, options={"webcam": True, "flip": self._tex_flip.isChecked()})
+            spec = AssetSpec(
+                kind=ASSET_STREAM_TEXTURE,
+                name=name,
+                path=path,
+                options={"webcam": True, "flip": self._tex_flip.isChecked()},
+            )
         elif self._tex_stream.isChecked():
-            spec = AssetSpec(kind="video", name=name, path=path, options={"flip": self._tex_flip.isChecked()})
+            spec = AssetSpec(
+                kind=ASSET_STREAM_TEXTURE,
+                name=name,
+                path=path,
+                options={"flip": self._tex_flip.isChecked()},
+            )
         else:
-            spec = AssetSpec(kind="image", name=name, path=path, options={"flip": self._tex_flip.isChecked()})
+            spec = AssetSpec(
+                kind=ASSET_NAMED_TEXTURE,
+                name=name,
+                path=path,
+                options={"flip": self._tex_flip.isChecked()},
+            )
         self.asset_added.emit(spec)
 
     def _on_load_audio(self) -> None:
         name = self._audio_name.text().strip() or "u_audio0"
         device = self._audio_dev.text().strip() or "-1"
-        spec = AssetSpec(kind="audio", name=name, options={"device": device})
+        spec = AssetSpec(kind=ASSET_AUDIO, name=name, options={"device": device})
         self.asset_added.emit(spec)
 
     def _on_load_skybox(self) -> None:
         path = self._env_path.text().strip()
         if not path:
             return
-        spec = AssetSpec(kind="skybox", path=path)
+        spec = AssetSpec(kind=ASSET_CUBEMAP_SHOW, path=path)
         self.asset_added.emit(spec)
 
     def _on_load_environment(self) -> None:
         path = self._env_path.text().strip()
         if not path:
             return
-        spec = AssetSpec(kind="environment", path=path)
+        spec = AssetSpec(kind=ASSET_CUBEMAP_ENV, path=path)
         self.asset_added.emit(spec)
 
     def _on_load_model(self) -> None:
         path = self._model_path.text().strip()
         if not path:
             return
-        spec = AssetSpec(kind="model", path=path)
+        spec = AssetSpec(kind=ASSET_MODEL, path=path)
         self.asset_added.emit(spec)
 
     def _on_load_sequence(self) -> None:
@@ -237,12 +262,12 @@ class AssetsPanel(QWidget):
         path = self._csv_path.text().strip()
         if not name or not path:
             return
-        spec = AssetSpec(kind="sequence", name=name, path=path)
+        spec = AssetSpec(kind=ASSET_SEQUENCE_UNIFORM, name=name, path=path)
         self.asset_added.emit(spec)
 
     def _on_load_camera_seq(self) -> None:
         path = self._csv_path.text().strip()
         if not path:
             return
-        spec = AssetSpec(kind="camera_sequence", path=path)
+        spec = AssetSpec(kind=ASSET_CAMERA_SEQUENCE, path=path)
         self.asset_added.emit(spec)

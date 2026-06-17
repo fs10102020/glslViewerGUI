@@ -106,7 +106,7 @@ class SessionDialog(QDialog):
         self._verbose.setChecked(self._config.verbose)
         form.addRow(self._verbose)
 
-        self._vflip = QCheckBox("Flip textures vertically (--vFlip)")
+        self._vflip = QCheckBox("Use backend --vFlip (disable default vertical flip)")
         self._vflip.setChecked(self._config.vflip)
         form.addRow(self._vflip)
 

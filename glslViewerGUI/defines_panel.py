@@ -40,19 +40,17 @@ class DefinesPanel(QWidget):
         self._list.itemClicked.connect(self._on_item_selected)
         layout.addWidget(self._list)
 
-        quick_group = QGroupBox("Multi-Pass Quick Presets")
+        quick_group = QGroupBox("Safe Quick Presets")
         quick_layout = QHBoxLayout(quick_group)
         for label, cmd_name, cmd_val in [
-            ("BUF_0", "BUFFER_0", ""),
-            ("BUF_1", "BUFFER_1", ""),
-            ("DBUF_0", "DOUBLE_BUFFER_0", ""),
-            ("PYR_0", "PYRAMID_0", ""),
-            ("FLD_0", "FLOOD_0", ""),
             ("AA", "AA", "2"),
         ]:
             btn = QPushButton(label)
             btn.clicked.connect(lambda checked=False, _n=cmd_name, _v=cmd_val: self._on_quick(_n, _v))
             quick_layout.addWidget(btn)
+        note = QLabel("Backend buffer defines are source-driven and not set globally.")
+        note.setWordWrap(True)
+        quick_layout.addWidget(note)
         layout.addWidget(quick_group)
 
         self._entries: dict[str, str] = {}

@@ -1,9 +1,11 @@
 import os
 from dataclasses import dataclass, field
 
+from commands import build_define
+
 FRAG_EXTENSIONS = (".frag", ".fs", ".glsl")
 VERT_EXTENSIONS = (".vert", ".vs")
-GEOM_EXTENSIONS = (".geom", ".gs")
+GEOM_EXTENSIONS = ()
 MESH_EXTENSIONS = (".ply", ".obj", ".stl", ".glb", ".gltf", ".splat")
 TEXTURE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tga", ".psd", ".gif", ".bmp", ".hdr", ".exr")
 VIDEO_EXTENSIONS = (".mov", ".mp4", ".mkv", ".mpg", ".mpeg", ".h264")
@@ -52,6 +54,27 @@ class AssetSpec:
     name: str = ""
     path: str = ""
     options: dict = field(default_factory=dict)
+
+
+# Canonical asset kinds shared by the classifier, asset panel, and session config.
+ASSET_NAMED_TEXTURE = "named_texture"
+ASSET_STREAM_TEXTURE = "stream_texture"
+ASSET_CUBEMAP_SHOW = "cubemap_show"
+ASSET_CUBEMAP_ENV = "cubemap_env"
+ASSET_AUDIO = "audio"
+ASSET_MODEL = "model"
+ASSET_SEQUENCE_UNIFORM = "sequence_uniform"
+ASSET_CAMERA_SEQUENCE = "camera_sequence"
+ASSET_AUTO_TEXTURE = "auto_texture"
+
+# Kinds that can be passed directly on the glslViewer command line.
+CLI_ASSET_KINDS = frozenset({
+    ASSET_AUTO_TEXTURE,
+    ASSET_NAMED_TEXTURE,
+    ASSET_CUBEMAP_SHOW,
+    ASSET_CUBEMAP_ENV,
+    ASSET_SEQUENCE_UNIFORM,
+})
 
 
 @dataclass
@@ -124,6 +147,8 @@ class RenderSessionConfig:
     frag_path: str | None = None
     vert_path: str | None = None
     geom_path: str | None = None
+    source_frag_path: str | None = None
+    source_vert_path: str | None = None
     include_dirs: list[str] = field(default_factory=list)
     defines: dict[str, str] = field(default_factory=dict)
     assets: list[AssetSpec] = field(default_factory=list)
@@ -148,9 +173,7 @@ class RenderSessionConfig:
     osc_port: int | None = None
 
     def build_args(self) -> list[str]:
-        args = []
-        if self.noncurses:
-            args.append("--noncurses")
+        args = ["--noncurses"]
         if self.headless:
             args.append("--headless")
         if self.fullscreen:
@@ -192,7 +215,7 @@ class RenderSessionConfig:
 
         for key, val in self.defines.items():
             if val:
-                args.append(f"-D{key}={val}")
+                args.extend(["-e", build_define(key, val)])
             else:
                 args.append(f"-D{key}")
 
@@ -205,12 +228,8 @@ class RenderSessionConfig:
                 args.extend(["-C", a.path])
             elif a.kind == "cubemap_env":
                 args.extend(["-c", a.path])
-            elif a.kind == "audio":
-                device = a.options.get("device", "")
-                if device:
-                    args.extend(["-a", device])
-                else:
-                    args.append("-a")
+            elif a.kind == "sequence_uniform":
+                args.extend([f"-{a.name}", a.path])
 
         if self.frag_path:
             args.append(self.frag_path)
@@ -226,6 +245,8 @@ class RenderSessionConfig:
             "frag_path": self.frag_path,
             "vert_path": self.vert_path,
             "geom_path": self.geom_path,
+            "source_frag_path": self.source_frag_path,
+            "source_vert_path": self.source_vert_path,
             "include_dirs": list(self.include_dirs),
             "defines": dict(self.defines),
             "assets": [
@@ -259,6 +280,8 @@ class RenderSessionConfig:
             frag_path=data.get("frag_path"),
             vert_path=data.get("vert_path"),
             geom_path=data.get("geom_path"),
+            source_frag_path=data.get("source_frag_path"),
+            source_vert_path=data.get("source_vert_path"),
             include_dirs=data.get("include_dirs", []),
             defines=data.get("defines", {}),
             assets=[AssetSpec(**a) for a in data.get("assets", [])],

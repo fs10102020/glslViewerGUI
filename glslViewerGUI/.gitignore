@@ -1,0 +1,13 @@
+# Python/local environments
+__pycache__/
+.venv/
+*.py[cod]
+*.egg-info/
+
+# Local agent installs/configuration
+.agents/
+skills-lock.json
+
+# Local screenshots/reference artifacts
+Screenshot.jpg
+fractal_de180_example.webp

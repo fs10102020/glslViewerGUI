@@ -51,9 +51,10 @@ def build_stream_texture(name: str, path: str, webcam: bool = False, flip: bool 
     _validate_name(name, "stream name")
     _validate_no_commas(path, "stream path")
     parts = ["stream_texture", name, path]
+    # glslViewer's fourth argument is either "webcam" or "flip", never both.
     if webcam:
         parts.append("webcam")
-    if flip:
+    elif flip:
         parts.append("flip")
     return csv_command(*parts)
 

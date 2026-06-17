@@ -6,8 +6,10 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout,
     QDoubleSpinBox, QSpinBox, QCheckBox, QHBoxLayout,
     QScrollArea, QPushButton, QLabel, QFileDialog,
-    QMessageBox,
+    QMessageBox, QColorDialog, QGroupBox,
 )
+from PySide6.QtGui import QColor
+
 from shader_parser import parse_uniforms
 
 
@@ -36,12 +38,14 @@ class UniformPanel(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self._container = QWidget()
-        self._form_layout = QFormLayout(self._container)
-        self._form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self._container_layout = QVBoxLayout(self._container)
+        self._container_layout.setSpacing(6)
+        self._container_layout.setContentsMargins(4, 4, 4, 4)
         scroll.setWidget(self._container)
         outer_layout.addWidget(scroll)
 
         self._widgets: dict[str, QWidget] = {}
+        self._groups: dict[str, QGroupBox] = {}
 
     def load_from_source(self, source: str) -> None:
         self.clear()
@@ -50,22 +54,41 @@ class UniformPanel(QWidget):
         if not uniforms:
             label = QLabel("No user uniforms found in shader.")
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._form_layout.addRow(label)
+            self._container_layout.addWidget(label)
             return
 
+        # Sort into groups preserving declaration order.
+        grouped: dict[str, list[dict]] = {}
         for info in uniforms:
-            name = info["name"]
-            w = self._build_widget(info)
-            if w is not None:
-                self._widgets[name] = w
-                self._form_layout.addRow(name + ":", w)
+            group = info.get("group", "Uniforms")
+            grouped.setdefault(group, []).append(info)
+
+        for group_name, items in grouped.items():
+            group_box = QGroupBox(group_name)
+            form = QFormLayout(group_box)
+            form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+            form.setContentsMargins(4, 8, 4, 4)
+            form.setSpacing(4)
+
+            for info in items:
+                name = info["name"]
+                w = self._build_widget(info)
+                if w is not None:
+                    self._widgets[name] = w
+                    form.addRow(name + ":", w)
+
+            self._container_layout.addWidget(group_box)
+            self._groups[group_name] = group_box
+
+        self._container_layout.addStretch()
 
     def clear(self) -> None:
-        while self._form_layout.count():
-            item = self._form_layout.takeAt(0)
+        while self._container_layout.count():
+            item = self._container_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self._widgets.clear()
+        self._groups.clear()
 
     def get_value(self, name: str):
         w = self._widgets.get(name)
@@ -78,20 +101,14 @@ class UniformPanel(QWidget):
             w = self._widgets.get(name)
             if w is None:
                 continue
-            if isinstance(w, QDoubleSpinBox):
-                w.setValue(float(val))
-            elif isinstance(w, QSpinBox):
-                w.setValue(int(val))
-            elif isinstance(w, QCheckBox):
-                w.setChecked(bool(val))
-            elif hasattr(w, '_spinboxes'):
-                if isinstance(val, (list, tuple)):
-                    for i, sp in enumerate(w._spinboxes):
-                        if i < len(val):
-                            sp.setValue(float(val[i]))
+            self._write_widget(w, val)
 
     def all_values(self) -> dict[str, object]:
         return {name: self._read_widget(w) for name, w in self._widgets.items()}
+
+    # ------------------------------------------------------------------
+    # Widget builders
+    # ------------------------------------------------------------------
 
     def _build_widget(self, info: dict):
         wtype = info["widget"]
@@ -100,7 +117,7 @@ class UniformPanel(QWidget):
             sp = QDoubleSpinBox()
             sp.setRange(info.get("min", -1e6), info.get("max", 1e6))
             sp.setSingleStep(info.get("step", 0.01))
-            sp.setValue(info["value"])
+            sp.setValue(float(info["value"]))
             sp.setDecimals(6)
             sp.valueChanged.connect(lambda v, n=info["name"]: self.uniform_changed.emit(n, v))
             return sp
@@ -108,16 +125,19 @@ class UniformPanel(QWidget):
         elif wtype == "int":
             sp = QSpinBox()
             sp.setRange(int(info.get("min", -1e6)), int(info.get("max", 1e6)))
-            sp.setSingleStep(info.get("step", 1))
-            sp.setValue(info["value"])
+            sp.setSingleStep(int(info.get("step", 1)))
+            sp.setValue(int(info["value"]))
             sp.valueChanged.connect(lambda v, n=info["name"]: self.uniform_changed.emit(n, v))
             return sp
 
         elif wtype == "bool":
             cb = QCheckBox()
-            cb.setChecked(info["value"])
+            cb.setChecked(bool(info["value"]))
             cb.toggled.connect(lambda v, n=info["name"]: self.uniform_changed.emit(n, v))
             return cb
+
+        elif wtype == "color":
+            return self._build_color_widget(info)
 
         elif wtype == "vec":
             return self._build_vec_widget(info)
@@ -126,6 +146,47 @@ class UniformPanel(QWidget):
             return self._build_mat_widget(info)
 
         return None
+
+    def _build_color_widget(self, info: dict):
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        preview = QPushButton()
+        preview.setFixedSize(24, 24)
+        preview.setFlat(True)
+
+        value = info["value"]
+        if isinstance(value, (list, tuple)) and len(value) >= 3:
+            color = QColor.fromRgbF(float(value[0]), float(value[1]), float(value[2]))
+        else:
+            color = QColor.fromRgbF(1.0, 1.0, 1.0)
+        preview.setStyleSheet(f"background-color: {color.name()}; border: 1px solid #888;")
+
+        label = QLabel(color.name())
+        label.setStyleSheet("font-family: monospace;")
+
+        layout.addWidget(preview)
+        layout.addWidget(label)
+        layout.addStretch()
+
+        container._value = [color.redF(), color.greenF(), color.blueF()]
+        container._preview = preview
+        container._label = label
+        container._size = len(value) if isinstance(value, (list, tuple)) else 3
+
+        def pick_color():
+            current = QColor.fromRgbF(*container._value[:3])
+            chosen = QColorDialog.getColor(current, self, "Choose color")
+            if chosen.isValid():
+                container._value[:3] = [chosen.redF(), chosen.greenF(), chosen.blueF()]
+                preview.setStyleSheet(f"background-color: {chosen.name()}; border: 1px solid #888;")
+                label.setText(chosen.name())
+                self.uniform_changed.emit(info["name"], list(container._value))
+
+        preview.clicked.connect(pick_color)
+        return container
 
     def _build_vec_widget(self, info: dict):
         container = QWidget()
@@ -192,6 +253,10 @@ class UniformPanel(QWidget):
 
         return container
 
+    # ------------------------------------------------------------------
+    # Read / write
+    # ------------------------------------------------------------------
+
     def _read_widget(self, w):
         if isinstance(w, QDoubleSpinBox):
             return w.value()
@@ -199,6 +264,9 @@ class UniformPanel(QWidget):
             return w.value()
         elif isinstance(w, QCheckBox):
             return w.isChecked()
+        elif hasattr(w, '_preview'):
+            # Color widget
+            return list(w._value)
         else:
             vals = []
             for child in w.findChildren(QDoubleSpinBox):
@@ -207,9 +275,34 @@ class UniformPanel(QWidget):
                 return vals[0]
             return vals
 
+    def _write_widget(self, w, val):
+        if isinstance(w, QDoubleSpinBox):
+            w.setValue(float(val))
+        elif isinstance(w, QSpinBox):
+            w.setValue(int(val))
+        elif isinstance(w, QCheckBox):
+            w.setChecked(bool(val))
+        elif hasattr(w, '_preview'):
+            # Color widget
+            if isinstance(val, (list, tuple)) and len(val) >= 3:
+                w._value[:3] = [float(val[0]), float(val[1]), float(val[2])]
+                color = QColor.fromRgbF(*w._value[:3])
+                w._preview.setStyleSheet(f"background-color: {color.name()}; border: 1px solid #888;")
+                w._label.setText(color.name())
+        elif hasattr(w, '_spinboxes'):
+            if isinstance(val, (list, tuple)):
+                for i, sp in enumerate(w._spinboxes):
+                    if i < len(val):
+                        sp.setValue(float(val[i]))
+
+    # ------------------------------------------------------------------
+    # Presets
+    # ------------------------------------------------------------------
+
     def _save_preset(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Preset", "", "JSON Presets (*.json)"
+            self, "Save Preset", "", "JSON Presets (*.json)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not path:
             return
@@ -222,7 +315,8 @@ class UniformPanel(QWidget):
 
     def _load_preset(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Load Preset", "", "JSON Presets (*.json)"
+            self, "Load Preset", "", "JSON Presets (*.json)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not path:
             return

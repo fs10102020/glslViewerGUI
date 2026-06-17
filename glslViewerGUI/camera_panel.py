@@ -4,6 +4,17 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QSpinBox, QComboBox, QPushButton,
     QHBoxLayout, QLabel, QGroupBox, QLineEdit,
 )
+from commands import (
+    build_camera_distance,
+    build_camera_default,
+    build_camera_exposure,
+    build_camera_fov,
+    build_camera_look_at,
+    build_camera_move,
+    build_camera_name,
+    build_camera_position,
+    build_camera_type,
+)
 
 
 class CameraPanel(QWidget):
@@ -24,7 +35,7 @@ class CameraPanel(QWidget):
         self._distance.setDecimals(3)
         self._distance.setValue(2.0)
         self._distance.valueChanged.connect(
-            lambda v: self.camera_command.emit(f"camera_distance,{v}")
+            lambda v: self.camera_command.emit(build_camera_distance(v))
         )
 
         # FOV
@@ -32,21 +43,19 @@ class CameraPanel(QWidget):
         self._fov.setRange(1, 179)
         self._fov.setValue(45)
         self._fov.valueChanged.connect(
-            lambda v: self.camera_command.emit(f"camera_fov,{v}")
+            lambda v: self.camera_command.emit(build_camera_fov(v))
         )
 
         # Projection type
         self._proj = QComboBox()
         self._proj.addItems(["perspective", "ortho"])
         self._proj.currentTextChanged.connect(
-            lambda t: self.camera_command.emit(f"camera_type,{t}")
+            lambda t: self.camera_command.emit(build_camera_type(t))
         )
 
         self._cam_name = QLineEdit()
         self._cam_name.setPlaceholderText("default")
-        self._cam_name.returnPressed.connect(
-            lambda: self.camera_command.emit(f"camera,{self._cam_name.text().strip()}")
-        )
+        self._cam_name.returnPressed.connect(self._set_camera_name)
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -101,8 +110,8 @@ class CameraPanel(QWidget):
         ]:
             btn = QPushButton(label)
             btn.clicked.connect(
-                lambda _dx=dx, _dy=dy, _dz=dz: self.camera_command.emit(
-                    f"camera_move,{_dx},{_dy},{_dz}"
+                lambda checked=False, _dx=dx, _dy=dy, _dz=dz: self.camera_command.emit(
+                    build_camera_move(_dx, _dy, _dz)
                 )
             )
             move_grid.addWidget(btn)
@@ -140,18 +149,22 @@ class CameraPanel(QWidget):
         x = self._pos_x.value()
         y = self._pos_y.value()
         z = self._pos_z.value()
-        self.camera_command.emit(f"camera_position,{x},{y},{z}")
+        self.camera_command.emit(build_camera_position(x, y, z))
 
     def _set_look_at(self) -> None:
         x = self._look_x.value()
         y = self._look_y.value()
         z = self._look_z.value()
-        self.camera_command.emit(f"camera_look_at,{x},{y},{z}")
+        self.camera_command.emit(build_camera_look_at(x, y, z))
 
     def _set_exposure(self) -> None:
         self.camera_command.emit(
-            f"camera_exposure,{self._exp_aper.value()},{self._exp_shutter.value()},{self._exp_iso.value()}"
+            build_camera_exposure(self._exp_aper.value(), self._exp_shutter.value(), self._exp_iso.value())
         )
+
+    def _set_camera_name(self) -> None:
+        name = self._cam_name.text().strip()
+        self.camera_command.emit(build_camera_name(name) if name else build_camera_default())
 
     def get_state(self) -> dict:
         return {

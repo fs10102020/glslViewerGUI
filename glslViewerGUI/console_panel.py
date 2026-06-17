@@ -1,5 +1,6 @@
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import QTextEdit, QWidget, QVBoxLayout, QPushButton
+import re
 
 
 class ConsolePanel(QWidget):
@@ -21,6 +22,9 @@ class ConsolePanel(QWidget):
         layout.addWidget(self._clear_btn)
 
     def append(self, text: str) -> None:
+        text = self._clean_output(text)
+        if not text:
+            return
         scrollbar = self._output.verticalScrollBar()
         at_bottom = scrollbar.value() >= scrollbar.maximum() - 4
 
@@ -33,3 +37,16 @@ class ConsolePanel(QWidget):
 
     def append_line(self, text: str) -> None:
         self.append(text + "\n")
+
+    def _clean_output(self, text: str) -> str:
+        text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)
+        lines = []
+        for line in text.replace("\r", "\n").splitlines(True):
+            stripped = line.strip()
+            if stripped == "// >" or stripped.startswith("// > "):
+                content = stripped[4:].strip()
+                if content:
+                    lines.append(content + "\n")
+                continue
+            lines.append(line)
+        return "".join(lines)

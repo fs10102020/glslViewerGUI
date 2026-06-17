@@ -1,0 +1,116 @@
+// ------------------------------------------------------------------
+// Generated main entry point
+// ------------------------------------------------------------------
+
+uniform int u_debugView; // 0=beauty, 1=normal, 2=distance, 3=steps, 4=albedo, 5=emission
+
+void main() {
+    initScene();
+
+    vec2 frag = gl_FragCoord.xy;
+    vec3 color = vec3(0.0);
+    float steps = 0.0;
+    float dist = 0.0;
+
+#if defined(SDF_INTEGRATOR_PATHTRACE)
+
+#ifdef DOUBLE_BUFFER_0
+    // Radiance accumulation pass.
+    {
+        vec2 uv0 = frag / u_resolution.xy;
+        vec4 prev_meta = texture2D(u_doubleBuffer1, uv0);
+        int stored_revision = int(prev_meta.a + 0.5) - 1;
+        bool reset = (u_frame <= 1) || u_cameraChange || u_resolutionChange || (u_sceneRevision != stored_revision);
+        float sample_count = reset ? 0.0 : prev_meta.r;
+        vec3 prev_accum = texture2D(u_doubleBuffer0, uv0).rgb;
+
+        int limit = min(u_samplesPerFrame, max(0, u_targetSamples - int(sample_count)));
+        if (limit <= 0) {
+            gl_FragColor = vec4(prev_accum, 1.0);
+            return;
+        }
+
+        init_rng(frag, int(sample_count));
+
+        vec3 sample_radiance = vec3(0.0);
+        for (int s = 0; s < 16; ++s) {
+            if (s >= limit) break;
+            vec2 jitter = rng2();
+            Ray ray = camera_ray_jittered(frag, jitter);
+            float s_steps, s_dist;
+            sample_radiance += pathtrace_integrator(ray, s_steps, s_dist);
+        }
+        sample_radiance /= float(limit);
+
+        vec3 accumulated = reset ? vec3(0.0) : prev_accum;
+        accumulated = (accumulated * sample_count + sample_radiance) / (sample_count + float(limit));
+
+        gl_FragColor = vec4(accumulated, 1.0);
+    }
+    return;
+#endif
+
+#ifdef DOUBLE_BUFFER_1
+    // Metadata pass: running sample count + revision token.
+    {
+        vec2 uv1 = frag / u_resolution.xy;
+        vec4 prev_meta = texture2D(u_doubleBuffer1, uv1);
+        int stored_revision1 = int(prev_meta.a + 0.5) - 1;
+        bool reset1 = (u_frame <= 1) || u_cameraChange || u_resolutionChange || (u_sceneRevision != stored_revision1);
+        float sample_count1 = reset1 ? 0.0 : prev_meta.r;
+
+        int limit1 = min(u_samplesPerFrame, max(0, u_targetSamples - int(sample_count1)));
+        if (limit1 <= 0) {
+            gl_FragColor = prev_meta;
+            return;
+        }
+
+        gl_FragColor = vec4(sample_count1 + float(limit1), 0.0, 0.0, float(u_sceneRevision + 1));
+    }
+    return;
+#endif
+
+    // Display pass (main pass with neither buffer define).
+    {
+        vec2 uv = frag / u_resolution.xy;
+        vec4 data = texture2D(u_doubleBuffer0, uv);
+        vec3 linear = data.rgb;
+
+        if (u_debugView == 1) {
+            Ray ray = camera_ray_jittered(frag, vec2(0.5));
+            Hit h = march(ray);
+            color = h.hit ? h.normal * 0.5 + 0.5 : vec3(0.0);
+        } else if (u_debugView == 4) {
+            Ray ray = camera_ray_jittered(frag, vec2(0.5));
+            Hit h = march(ray);
+            color = h.hit ? baseColor(h.p, h.normal) : vec3(0.0);
+        } else if (u_debugView == 5) {
+            Ray ray = camera_ray_jittered(frag, vec2(0.5));
+            Hit h = march(ray);
+            color = h.hit ? emissionAt(h.p, h.normal) : vec3(0.0);
+        } else {
+            color = display(linear);
+        }
+    }
+
+#else
+    // Preview integrator
+    Ray ray = camera_ray_jittered(frag, vec2(0.5));
+    color = preview_integrator(ray, steps, dist);
+
+    Hit h = march(ray);
+    if (u_debugView == 1) color = h.hit ? h.normal * 0.5 + 0.5 : vec3(0.0);
+    if (u_debugView == 2) color = vec3(dist / u_maxDistance);
+    if (u_debugView == 3) color = vec3(steps / float(u_maxSteps));
+    if (u_debugView == 4) {
+        color = h.hit ? baseColor(h.p, h.normal) : vec3(0.0);
+    }
+    if (u_debugView == 5) {
+        color = h.hit ? emissionAt(h.p, h.normal) : vec3(0.0);
+    }
+
+    color = display(color);
+#endif
+
+    gl_FragColor = vec4(color, 1.0);
+}
