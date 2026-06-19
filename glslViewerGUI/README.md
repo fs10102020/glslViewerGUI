@@ -2,8 +2,6 @@
 
 A PySide6 desktop GUI that wraps [glslViewer](https://github.com/patriciogonzalezvivo/glslViewer), providing a live shader editor, uniform controls, camera manipulation, recording tools, preset management, and a built-in SDF (signed distance field) renderer for ray-marched / path-traced scenes.
 
-![Screenshot](Screenshot.jpg)
-
 ## Requirements
 
 - Python 3.10+
