@@ -1,3 +1,4 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 import hashlib
 from pathlib import Path
 

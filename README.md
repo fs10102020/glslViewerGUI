@@ -27,11 +27,12 @@ make uninstall      # removes installed files
 ## Features
 
 - **Live GLSL Editor** — syntax highlighting, error line highlighting, auto-reload on save.
-- **Smart File Loading** — `File → Open` accepts any glslViewer-loadable file: fragments, vertices, models, cubemaps, images, videos, CSVs, and SDF project directories. See [File Loading](#file-loading) below.
-- **SDF Renderer** — turn-key signed-distance-field pipeline. Define a `float DE(vec3 p)` and the GUI composes a complete raymarcher (preview) or progressive path tracer (automatic two-pass `DOUBLE_BUFFER` accumulation) plus exposure, tone mapping, gamma, and accumulation reset.
+- **Smart File Loading** — `File → Open` accepts any glslViewer-loadable file: fragments, vertices, models, cubemaps, images, videos, CSVs, SDF project directories, URLs, `/dev/*` capture devices, and folders/wildcards treated as streaming image sequences. See [File Loading](#file-loading) below.
+- **SDF Renderer** — turn-key signed-distance-field pipeline. Define a `float DE(vec3 p)` and the GUI composes a complete raymarcher (preview) or progressive path tracer (automatic two-pass `DOUBLE_BUFFER` accumulation) plus exposure, tone mapping, gamma, environment colors, shadow controls, and accumulation reset.
 - **Uniform Panel** — auto-detects shader uniforms (float, int, bool, vec2/3/4, mat2/3/4); `// @ui slider min=0 max=1 step=0.01 default=0.5 group="…"` comments group and bound the widgets. Save/load presets.
-- **Camera Panel** — distance, FOV, projection, position, look-at, nudge controls.
-- **Recording Panel** — screenshots, PNG sequences, MP4/GIF video recording (via glslViewer's ffmpeg integration).
+- **Camera Panel** — distance, FOV, projection, position, look-at, nudge, exposure controls.
+- **Recording Panel** — screenshots, PNG sequences, frame-index sequences, MP4/GIF video recording (via glslViewer's ffmpeg integration).
+- **Raw Command Console** — type any glslViewer command directly; query mode routes responses back to the console (Ctrl+L to focus).
 - **Preset Manager** — save and restore complete sessions (shader + uniforms + camera).
 - **Theming** — Dark, Light, and System themes with persistent preference.
 - **Error Recovery** — auto-restarts crashed renderer with fallback to default shader.
@@ -44,6 +45,7 @@ make uninstall      # removes installed files
 | Ctrl+Shift+N | New SDF project |
 | Ctrl+Shift+O | Open SDF project directory |
 | Ctrl+S | Save current editor buffer (inside the editor) |
+| Ctrl+L | Focus raw command console |
 | F5 | Reload shader |
 | Ctrl+Q | Quit |
 
@@ -55,12 +57,14 @@ What it recognises:
 
 - `.frag` / `.fs` — fragment shader.
 - `.vert` / `.vs` — vertex shader.
-- `.glsl` — content-sniffed for `float DE(vec3 p)`, `gl_Position`, `gl_FragColor`/`fragColor`, `mainImage`, Shadertoy uniforms, or `#pragma stage`. A generic `.glsl` with `void main()` is used as a fragment shader by default.
+- `.glsl` — content-sniffed for `float DE(vec3 p)`, `gl_Position`, `gl_FragColor`/`fragColor`, `mainImage`, Shadertoy uniforms, or `#pragma stage`. A generic `.glsl` with `void main()` is used as a fragment shader by default, except **Open Vertex Shader...** forces vertex interpretation.
 - Directories containing `project.json` with `"type": "sdf_project"` — SDF project.
+- Other directories and wildcard paths — streaming image sequences.
 - A selected `project.json` file itself is also accepted as an SDF project shortcut.
 - `.ply`, `.obj`, `.stl`, `.glb`, `.gltf`, `.splat` — model / geometry assets.
 - `.png`, `.jpg`, `.jpeg`, `.tga`, `.psd`, `.gif`, `.bmp`, `.hdr`, `.exr` — textures / cubemaps.
 - `.mov`, `.mp4`, `.mkv`, `.mpg`, `.mpeg`, `.h264` — video streams.
+- URLs and `/dev/*` paths — stream textures / capture devices.
 - `.csv` — uniform or camera sequence (camera CSV if filename starts with `camera`).
 
 A `.frag` is auto-paired with its `.vert` sibling and vice versa. Multi-file selection builds one combined session. Standalone `.glsl` files that only define `DE()` are imported as temporary SDF projects. Opening only assets or a model keeps the current fragment shader active and loads the assets at runtime.
@@ -113,7 +117,7 @@ cd glslViewerGUI
 QT_QPA_PLATFORM=offscreen uv run python smoke_test.py
 ```
 
-The smoke test monkey-patches `RenderBridge.start` so no `glslViewer` is launched, and runs table-driven checks for the file classifier, SDF project validation, uniform parsing, and the panel layout.
+The smoke test monkey-patches `RenderBridge.start` so no `glslViewer` is launched, and runs table-driven checks for the file classifier, SDF project validation, uniform parsing, command builders, session flags, query protocol, watcher batching, and the panel layout.
 
 ## File Layout
 
@@ -150,7 +154,7 @@ glslViewerGUI/
   assets_panel.py               — Texture / asset queue
   streams_panel.py              — Video stream controls
   runtime_controls_panel.py     — fps / fullFps / vsync toggles
-  console_panel.py              — Stdout/stderr log
+  console_panel.py              — Stdout/stderr log and raw command input
   error_parser.py               — Driver-agnostic shader compile error parser
   shader_diagnostics.py         — frag/vert pairing checks
   session_config.py             — RenderSessionConfig + ShaderProgramSpec

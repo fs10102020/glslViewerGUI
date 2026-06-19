@@ -1,19 +1,9 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QFormLayout,
+    QWidget, QVBoxLayout, QFormLayout, QHBoxLayout,
     QDoubleSpinBox, QSpinBox, QComboBox, QPushButton,
-    QHBoxLayout, QLabel, QGroupBox, QLineEdit,
-)
-from commands import (
-    build_camera_distance,
-    build_camera_default,
-    build_camera_exposure,
-    build_camera_fov,
-    build_camera_look_at,
-    build_camera_move,
-    build_camera_name,
-    build_camera_position,
-    build_camera_type,
+    QLabel, QGroupBox, QLineEdit,
 )
 
 
@@ -28,44 +18,77 @@ class CameraPanel(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(10)
 
-        # Distance
+        dist_row = QHBoxLayout()
+        dist_row.addWidget(QLabel("Distance:"))
         self._distance = QDoubleSpinBox()
         self._distance.setRange(0.01, 1e6)
         self._distance.setSingleStep(0.1)
         self._distance.setDecimals(3)
         self._distance.setValue(2.0)
         self._distance.valueChanged.connect(
-            lambda v: self.camera_command.emit(build_camera_distance(v))
+            lambda v: self.camera_command.emit(f"camera_distance,{v}")
         )
+        dist_row.addWidget(self._distance)
+        layout.addLayout(dist_row)
 
-        # FOV
+        fov_row = QHBoxLayout()
+        fov_row.addWidget(QLabel("FOV:"))
         self._fov = QSpinBox()
         self._fov.setRange(1, 179)
         self._fov.setValue(45)
         self._fov.valueChanged.connect(
-            lambda v: self.camera_command.emit(build_camera_fov(v))
+            lambda v: self.camera_command.emit(f"camera_fov,{v}")
         )
+        fov_row.addWidget(self._fov)
+        layout.addLayout(fov_row)
 
-        # Projection type
+        proj_row = QHBoxLayout()
+        proj_row.addWidget(QLabel("Projection:"))
         self._proj = QComboBox()
         self._proj.addItems(["perspective", "ortho"])
         self._proj.currentTextChanged.connect(
-            lambda t: self.camera_command.emit(build_camera_type(t))
+            lambda t: self.camera_command.emit(f"camera_type,{t}")
         )
+        proj_row.addWidget(self._proj)
+        layout.addLayout(proj_row)
 
+        cam_name_row = QHBoxLayout()
+        cam_name_row.addWidget(QLabel("Camera:"))
         self._cam_name = QLineEdit()
-        self._cam_name.setPlaceholderText("default")
-        self._cam_name.returnPressed.connect(self._set_camera_name)
+        self._cam_name.setPlaceholderText("camera name")
+        self._cam_name.editingFinished.connect(self._on_cam_name)
+        cam_name_row.addWidget(self._cam_name)
+        layout.addLayout(cam_name_row)
 
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        form.addRow("Distance:", self._distance)
-        form.addRow("FOV:", self._fov)
-        form.addRow("Projection:", self._proj)
-        form.addRow("Name:", self._cam_name)
-        layout.addLayout(form)
+        exposure_group = QGroupBox("Exposure")
+        exp_layout = QHBoxLayout(exposure_group)
+        exp_layout.addWidget(QLabel("Aperture:"))
+        self._exp_aper = QDoubleSpinBox()
+        self._exp_aper.setRange(0.0, 100.0)
+        self._exp_aper.setDecimals(2)
+        self._exp_aper.setSingleStep(0.1)
+        self._exp_aper.setValue(2.8)
+        exp_layout.addWidget(self._exp_aper)
+        exp_layout.addWidget(QLabel("Shutter:"))
+        self._exp_shutter = QDoubleSpinBox()
+        self._exp_shutter.setRange(0.0, 1.0)
+        self._exp_shutter.setDecimals(4)
+        self._exp_shutter.setSingleStep(0.01)
+        self._exp_shutter.setValue(0.01)
+        exp_layout.addWidget(self._exp_shutter)
+        exp_layout.addWidget(QLabel("ISO:"))
+        self._exp_iso = QDoubleSpinBox()
+        self._exp_iso.setRange(1.0, 25600.0)
+        self._exp_iso.setDecimals(0)
+        self._exp_iso.setSingleStep(100.0)
+        self._exp_iso.setValue(100.0)
+        exp_layout.addWidget(self._exp_iso)
+        exp_set = QPushButton("Set")
+        exp_set.setMaximumWidth(50)
+        exp_set.clicked.connect(self._set_exposure)
+        exp_layout.addWidget(exp_set)
+        layout.addWidget(exposure_group)
 
-        # Position
         pos_group = QGroupBox("Position")
         pos_layout = QHBoxLayout(pos_group)
         self._pos_x = self._make_spinbox()
@@ -82,7 +105,6 @@ class CameraPanel(QWidget):
         pos_layout.addWidget(btn_pos)
         layout.addWidget(pos_group)
 
-        # Look At
         look_group = QGroupBox("Look At")
         look_layout = QHBoxLayout(look_group)
         self._look_x = self._make_spinbox()
@@ -99,7 +121,6 @@ class CameraPanel(QWidget):
         look_layout.addWidget(btn_look)
         layout.addWidget(look_group)
 
-        # Move buttons
         move_group = QGroupBox("Nudge")
         move_grid = QHBoxLayout(move_group)
         for label, dx, dy, dz in [
@@ -111,30 +132,11 @@ class CameraPanel(QWidget):
             btn = QPushButton(label)
             btn.clicked.connect(
                 lambda checked=False, _dx=dx, _dy=dy, _dz=dz: self.camera_command.emit(
-                    build_camera_move(_dx, _dy, _dz)
+                    f"camera_move,{_dx},{_dy},{_dz}"
                 )
             )
             move_grid.addWidget(btn)
         layout.addWidget(move_group)
-
-        exposure_group = QGroupBox("Exposure")
-        exposure_layout = QHBoxLayout(exposure_group)
-        self._exp_aper = self._make_spinbox()
-        self._exp_aper.setValue(5.6)
-        self._exp_shutter = self._make_spinbox()
-        self._exp_shutter.setValue(125.0)
-        self._exp_iso = self._make_spinbox()
-        self._exp_iso.setValue(100.0)
-        exposure_layout.addWidget(QLabel("Aperture"))
-        exposure_layout.addWidget(self._exp_aper)
-        exposure_layout.addWidget(QLabel("Shutter"))
-        exposure_layout.addWidget(self._exp_shutter)
-        exposure_layout.addWidget(QLabel("ISO"))
-        exposure_layout.addWidget(self._exp_iso)
-        btn_exp = QPushButton("Set")
-        btn_exp.clicked.connect(self._set_exposure)
-        exposure_layout.addWidget(btn_exp)
-        layout.addWidget(exposure_group)
 
         layout.addStretch()
 
@@ -145,26 +147,28 @@ class CameraPanel(QWidget):
         sp.setDecimals(3)
         return sp
 
+    def _on_cam_name(self) -> None:
+        name = self._cam_name.text().strip()
+        if name:
+            self.camera_command.emit(f"camera,{name}")
+
+    def _set_exposure(self) -> None:
+        aper = self._exp_aper.value()
+        shutter = self._exp_shutter.value()
+        iso = self._exp_iso.value()
+        self.camera_command.emit(f"camera_exposure,{aper},{shutter},{iso}")
+
     def _set_position(self) -> None:
         x = self._pos_x.value()
         y = self._pos_y.value()
         z = self._pos_z.value()
-        self.camera_command.emit(build_camera_position(x, y, z))
+        self.camera_command.emit(f"camera_position,{x},{y},{z}")
 
     def _set_look_at(self) -> None:
         x = self._look_x.value()
         y = self._look_y.value()
         z = self._look_z.value()
-        self.camera_command.emit(build_camera_look_at(x, y, z))
-
-    def _set_exposure(self) -> None:
-        self.camera_command.emit(
-            build_camera_exposure(self._exp_aper.value(), self._exp_shutter.value(), self._exp_iso.value())
-        )
-
-    def _set_camera_name(self) -> None:
-        name = self._cam_name.text().strip()
-        self.camera_command.emit(build_camera_name(name) if name else build_camera_default())
+        self.camera_command.emit(f"camera_look_at,{x},{y},{z}")
 
     def get_state(self) -> dict:
         return {

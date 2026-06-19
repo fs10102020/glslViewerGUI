@@ -1,3 +1,4 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -5,7 +6,7 @@ from PySide6.QtWidgets import (
     QSpinBox, QLineEdit, QLabel, QCheckBox,
 )
 from commands import (
-    build_buffers, build_textures_display, build_debug,
+    build_buffers, build_debug,
     build_define, build_floor, build_grid, build_axis, build_bboxes,
 )
 
@@ -26,11 +27,14 @@ class PipelinePanel(QWidget):
         buf_grid = QGridLayout(buf_group)
         for i, (label, cmd_true, cmd_false) in enumerate([
             ("Buffers", build_buffers(True), build_buffers(False)),
-            ("Textures", build_textures_display(True), build_textures_display(False)),
         ]):
             cb = QCheckBox(label)
             cb.toggled.connect(lambda v, _t=cmd_true, _f=cmd_false: self.command_requested.emit(_t if v else _f))
             buf_grid.addWidget(cb, 0, i)
+        tex_cb = QCheckBox("Textures")
+        tex_cb.setEnabled(False)
+        tex_cb.setToolTip("The backend does not provide a runtime textures,on/off toggle.")
+        buf_grid.addWidget(tex_cb, 0, 1)
         debug_cb = QCheckBox("Debug")
         debug_cb.toggled.connect(lambda v: self.command_requested.emit(build_debug(v)))
         buf_grid.addWidget(debug_cb, 1, 0)

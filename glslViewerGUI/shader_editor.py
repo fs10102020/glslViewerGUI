@@ -1,4 +1,5 @@
-from PySide6.QtCore import Qt, QTimer, Signal
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import (
     QFont, QColor, QTextCharFormat, QSyntaxHighlighter,
     QTextCursor, QTextBlockFormat, QKeyEvent,

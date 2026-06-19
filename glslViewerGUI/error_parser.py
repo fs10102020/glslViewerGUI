@@ -1,3 +1,4 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 import re
 
 # Apple M1:  ERROR: 0:41: 'color' : syntax error

@@ -1,3 +1,4 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,

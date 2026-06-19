@@ -1,4 +1,5 @@
-from PySide6.QtCore import Qt, Signal
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
+from PySide6.QtCore import Qt, Signal, QSignalBlocker
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QGroupBox, QComboBox, QCheckBox, QLabel,
@@ -35,16 +36,18 @@ class RuntimeControlsPanel(QWidget):
 
         display_group = QGroupBox("Display Toggles")
         disp_grid = QHBoxLayout(display_group)
-        for label, on_cmd, off_cmd in [
-            ("Debug", build_debug(True), build_debug(False)),
-            ("Error Screen", build_error_screen(True), build_error_screen(False)),
-            ("Cursor", build_cursor(True), build_cursor(False)),
-            ("VSync", build_vsync(True), build_vsync(False)),
-            ("Full FPS", build_full_fps(True), build_full_fps(False)),
+        self._display_checkboxes: dict[str, QCheckBox] = {}
+        for label, on_cmd, off_cmd, default in [
+            ("Debug", build_debug(True), build_debug(False), False),
+            ("Error Screen", build_error_screen(True), build_error_screen(False), False),
+            ("Cursor", build_cursor(True), build_cursor(False), True),
+            ("VSync", build_vsync(True), build_vsync(False), True),
+            ("Full FPS", build_full_fps(True), build_full_fps(False), False),
         ]:
             cb = QCheckBox(label)
-            cb.setChecked(True)
+            cb.setChecked(default)
             cb.toggled.connect(lambda v, _on=on_cmd, _off=off_cmd: self.command_requested.emit(_on if v else _off))
+            self._display_checkboxes[label] = cb
             disp_grid.addWidget(cb)
         layout.addWidget(display_group)
 
@@ -83,3 +86,26 @@ class RuntimeControlsPanel(QWidget):
         layout.addWidget(env_group)
 
         layout.addStretch()
+
+    def set_display_state(self, label: str, value: bool | None) -> None:
+        """Update a display checkbox without emitting commands (None = indeterminate).
+
+        All signals on the checkbox are blocked while the state is being
+        applied so the user (or this setter) cannot trigger a feedback loop
+        where applying a backend state changes the checkbox, the change
+        emits ``toggled``, the slot sends a command, and the backend
+        re-emits the same state.
+        """
+        cb = self._display_checkboxes.get(label)
+        if cb is None:
+            return
+        blocker = QSignalBlocker(cb)
+        try:
+            if value is None:
+                cb.setTristate(True)
+                cb.setCheckState(Qt.CheckState.PartiallyChecked)
+            else:
+                cb.setTristate(False)
+                cb.setChecked(value)
+        finally:
+            del blocker

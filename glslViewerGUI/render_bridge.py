@@ -1,12 +1,21 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 import os
+import re as _re
 import time
-from collections import deque
-from typing import Callable
+from dataclasses import dataclass
+from typing import Callable, Optional
+
 from PySide6.QtCore import QProcess, QFileSystemWatcher, Signal, QObject, QTimer
 
 from glslViewer_config import GLSLVIEWER_BIN
-from commands import build_record, build_screenshot, build_sequence, build_uniform
+from commands import build_uniform
 from session_config import RenderSessionConfig, ShaderProgramSpec
+
+
+@dataclass
+class _PendingCommand:
+    command: str
+    callback: Optional[Callable[[str], None]] = None
 
 
 class RenderBridge(QObject):
@@ -14,32 +23,35 @@ class RenderBridge(QObject):
     stderr_received = Signal(str)
     process_started = Signal()
     process_stopped = Signal()
-    process_crashed = Signal(int, int)  # exit_code, exit_status
+    process_crashed = Signal(int, int)
     process_exited_normally = Signal()
     process_gave_up = Signal()
     recording_progress = Signal(float)
-    file_changed = Signal(str)
+    state_query_response = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._proc: QProcess | None = None
         self._watch: QFileSystemWatcher | None = None
-        self._default_watch_files: list[str] = []
-        self._extra_watch_files: list[str] = []
-        self._pending_changed_path: str | None = None
         self._shader_path: str | None = None
         self._vert_path: str | None = None
         self._geom_path: str | None = None
         self._shader_source: str = ""
-        self._program = ShaderProgramSpec()
-        self._session_config = RenderSessionConfig()
 
         self._crash_count = 0
         self._last_crash_time = 0.0
         self._restart_timer: QTimer | None = None
-        self._deferred_reload_timer: QTimer | None = None
-        self._pending_queries: deque[Callable[[str], None]] = deque()
-        self._query_buffer = ""
+
+        self._pending: list[_PendingCommand] = []
+        self._startup_prompt_seen = False
+        self._prompt_buffer = ""
+        self._pending_changed_paths: set[str] = set()
+        self._watcher_debounce: QTimer | None = None
+        self._query_timeout: QTimer | None = None
+        self._session_backed: bool = False
+
+        self._session_config = RenderSessionConfig()
+        self._program = ShaderProgramSpec()
 
     @property
     def is_running(self) -> bool:
@@ -62,8 +74,16 @@ class RenderBridge(QObject):
         return self._program
 
     @property
-    def session_config(self) -> RenderSessionConfig:
-        return self._session_config
+    def pending_command_count(self) -> int:
+        return len(self._pending)
+
+    @property
+    def session_backed(self) -> bool:
+        return self._session_backed
+
+    # ------------------------------------------------------------------
+    # Start / stop
+    # ------------------------------------------------------------------
 
     def start(self, shader_path: str | None = None, vert_path: str | None = None, geom_path: str | None = None) -> None:
         if self.is_running:
@@ -72,13 +92,14 @@ class RenderBridge(QObject):
         self._shader_path = shader_path
         self._vert_path = vert_path
         self._geom_path = geom_path
+        if shader_path and os.path.exists(shader_path):
+            with open(shader_path) as f:
+                self._shader_source = f.read()
+
         self._program = ShaderProgramSpec(frag_path=shader_path, vert_path=vert_path, model_path=geom_path)
         self._session_config.frag_path = shader_path
         self._session_config.vert_path = vert_path
         self._session_config.geom_path = geom_path
-        if shader_path and os.path.exists(shader_path):
-            with open(shader_path) as f:
-                self._shader_source = f.read()
 
         self._proc = QProcess(self)
         self._proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
@@ -86,24 +107,71 @@ class RenderBridge(QObject):
         self._proc.readyReadStandardError.connect(self._on_stderr)
         self._proc.finished.connect(self._on_finished)
 
-        if self._session_config.cwd:
-            self._proc.setWorkingDirectory(self._session_config.cwd)
-
-        args = self._session_config.build_args()
-        if "--noncurses" not in args:
-            args.insert(0, "--noncurses")
+        args = ["--noncurses", "--fullFps"]
+        if shader_path and os.path.exists(shader_path):
+            args.append(shader_path)
+        if vert_path and os.path.exists(vert_path):
+            args.append(vert_path)
+        if geom_path and os.path.exists(geom_path):
+            args.append(geom_path)
 
         self._proc.start(GLSLVIEWER_BIN, args)
 
         if not self._proc.waitForStarted(5000):
             raise RuntimeError(f"Failed to start glslViewer: {self._proc.errorString()}")
 
+        self._pending.clear()
+        self._startup_prompt_seen = False
+        self._prompt_buffer = ""
+        self._setup_watcher()
+        self.process_started.emit()
+
+    def start_session(self, config: RenderSessionConfig) -> None:
+        if self.is_running:
+            self.stop()
+
+        self._session_config = config
+        self._session_backed = True
+        self._shader_path = config.frag_path
+        self._vert_path = config.vert_path
+        self._geom_path = config.geom_path
+
+        if config.frag_path and os.path.exists(config.frag_path):
+            with open(config.frag_path) as f:
+                self._shader_source = f.read()
+
+        self._program = ShaderProgramSpec(
+            frag_path=config.frag_path,
+            vert_path=config.vert_path,
+            model_path=config.geom_path,
+        )
+
+        self._proc = QProcess(self)
+        self._proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+        self._proc.readyReadStandardOutput.connect(self._on_stdout)
+        self._proc.readyReadStandardError.connect(self._on_stderr)
+        self._proc.finished.connect(self._on_finished)
+
+        args = config.build_args()
+        cwd = config.cwd or None
+        if cwd and os.path.isdir(cwd):
+            self._proc.setWorkingDirectory(cwd)
+        self._proc.start(GLSLVIEWER_BIN, args)
+
+        if not self._proc.waitForStarted(5000):
+            self._session_backed = False
+            raise RuntimeError(f"Failed to start glslViewer: {self._proc.errorString()}")
+
+        self._pending.clear()
+        self._startup_prompt_seen = False
+        self._prompt_buffer = ""
         self._setup_watcher()
         self.process_started.emit()
 
     def stop(self) -> None:
         self._cancel_restart()
         self._stop_watcher()
+        self._stop_query_timeout()
 
         if self._proc:
             if self._proc.state() == QProcess.ProcessState.Running:
@@ -117,33 +185,30 @@ class RenderBridge(QObject):
                     self._proc.waitForFinished(1000)
             self._proc = None
 
+        self._pending.clear()
+        self._session_backed = False
         self.process_stopped.emit()
+
+    # ------------------------------------------------------------------
+    # Command dispatch
+    # ------------------------------------------------------------------
 
     def send_command(self, command: str) -> None:
         if self.is_running:
             full = command if command.endswith("\n") else command + "\n"
+            self._pending.append(_PendingCommand(command=command.strip()))
             self._proc.write(full.encode("utf-8"))
 
     def send_query(self, command: str, callback: Callable[[str], None]) -> None:
-        if not self.is_running:
-            callback("")
-            return
-        if not self._pending_queries:
-            self._query_buffer = ""
-        self._pending_queries.append(callback)
-        self.send_command(command)
+        if self.is_running:
+            full = command if command.endswith("\n") else command + "\n"
+            self._pending.append(_PendingCommand(command=command.strip(), callback=callback))
+            self._proc.write(full.encode("utf-8"))
+            self._start_query_timeout()
 
     def set_uniform(self, name: str, value) -> None:
         cmd = build_uniform(name, value)
         self.send_command(cmd)
-
-    def set_uniform_raw(self, name: str, *values: float) -> None:
-        parts = ",".join(str(v) for v in values)
-        self.send_command(f"{name},{parts}")
-
-    def apply_session_config(self, config: RenderSessionConfig) -> None:
-        self._session_config = config
-        self.start(config.frag_path, config.vert_path, config.geom_path)
 
     def load_shader(self, path: str, vert_path: str | None = None, geom_path: str | None = None) -> None:
         if not os.path.exists(path):
@@ -155,34 +220,32 @@ class RenderBridge(QObject):
         if self._shader_path and os.path.exists(self._shader_path):
             self.send_command("reload")
 
-    def set_watch_files(self, paths: list[str]) -> None:
-        """Replace the extra/custom file watcher set with the given paths.
-
-        The default watch set (current fragment, vertex, and geometry/model
-        files) is always watched automatically when they exist.
-        """
-        self._extra_watch_files = [p for p in paths if os.path.exists(p)]
-        self._setup_watcher()
-
     def screenshot(self, path: str) -> None:
-        self.send_command(build_screenshot(path))
+        self.send_command(f"screenshot,{path}")
 
     def sequence(self, prefix: str, from_sec: float, to_sec: float, fps: float = 24.0) -> None:
-        self.send_command(build_sequence(prefix, from_sec, to_sec, fps))
+        self.send_command(f"sequence,{prefix},{from_sec},{to_sec},{fps}")
 
     def record(self, path: str, from_sec: float, to_sec: float, fps: float = 24.0) -> None:
-        self.send_command(build_record(path, from_sec, to_sec, fps))
+        self.send_command(f"record,{path},{from_sec},{to_sec},{fps}")
+
+    def frames(self, prefix: str, from_frame: int, to_frame: int, fps: float = 24.0) -> None:
+        self.send_command(f"frames,{prefix},{from_frame},{to_frame},{fps}")
 
     @property
     def shader_source(self) -> str:
         return self._shader_source
+
+    # ------------------------------------------------------------------
+    # I/O handling
+    # ------------------------------------------------------------------
 
     def _on_stdout(self) -> None:
         raw = self._proc.readAllStandardOutput()
         data = bytes(raw).decode("utf-8", errors="replace")
         if data:
             self._parse_recording_progress(data)
-            self._route_query_output(data)
+            self._route_prompt_output(data)
             self.stdout_received.emit(data)
 
     def _on_stderr(self) -> None:
@@ -191,15 +254,62 @@ class RenderBridge(QObject):
         if data:
             self.stderr_received.emit(data)
 
+    def _route_prompt_output(self, chunk: str = "") -> None:
+        if chunk:
+            self._prompt_buffer += chunk
+        while "// > " in self._prompt_buffer:
+            idx = self._prompt_buffer.find("// > ")
+            batch = self._prompt_buffer[:idx]
+            self._prompt_buffer = self._prompt_buffer[idx + len("// > "):]
+
+            if not self._startup_prompt_seen:
+                self._startup_prompt_seen = True
+                continue
+
+            if self._pending:
+                cmd = self._pending.pop(0)
+                text = batch.strip()
+                if cmd.callback:
+                    cmd.callback(text)
+
+        if not self._has_pending_queries():
+            self._stop_query_timeout()
+
+    def _flush_stale_prompts(self) -> None:
+        while self._pending:
+            cmd = self._pending.pop(0)
+            if cmd.callback:
+                cmd.callback("")
+        self._stop_query_timeout()
+
+    def _has_pending_queries(self) -> bool:
+        return any(cmd.callback is not None for cmd in self._pending)
+
+    def _start_query_timeout(self) -> None:
+        if self._query_timeout is None:
+            self._query_timeout = QTimer(self)
+            self._query_timeout.setSingleShot(True)
+            self._query_timeout.setInterval(5000)
+            self._query_timeout.timeout.connect(self._flush_stale_prompts)
+        self._query_timeout.start()
+
+    def _stop_query_timeout(self) -> None:
+        if self._query_timeout is not None and self._query_timeout.isActive():
+            self._query_timeout.stop()
+
+    # ------------------------------------------------------------------
+    # Process lifecycle
+    # ------------------------------------------------------------------
+
     def _on_finished(self, exit_code: int, exit_status: QProcess.ExitStatus) -> None:
         self._stop_watcher()
+        self._stop_query_timeout()
+        self._flush_stale_prompts()
 
         is_crash = exit_status == QProcess.ExitStatus.CrashExit or exit_code != 0
         now = time.time()
 
         if is_crash:
-            if now - self._last_crash_time > 30.0:
-                self._crash_count = 0
             self._crash_count += 1
             self._last_crash_time = now
             self.process_crashed.emit(exit_code, exit_status.value)
@@ -208,9 +318,14 @@ class RenderBridge(QObject):
                 delay_ms = 500 * self._crash_count
                 self._restart_timer = QTimer(self)
                 self._restart_timer.setSingleShot(True)
-                self._restart_timer.timeout.connect(
-                    lambda: self.start(self._shader_path, self._vert_path, self._geom_path)
-                )
+                if self._session_backed:
+                    self._restart_timer.timeout.connect(
+                        lambda: self.start_session(self._session_config)
+                    )
+                else:
+                    self._restart_timer.timeout.connect(
+                        lambda: self.start(self._shader_path, self._vert_path, self._geom_path)
+                    )
                 self._restart_timer.start(delay_ms)
             else:
                 self._crash_count = 0
@@ -220,6 +335,7 @@ class RenderBridge(QObject):
                 self._crash_count = 0
             self.process_exited_normally.emit()
 
+        self._session_backed = False
         self.process_stopped.emit()
 
     def _cancel_restart(self) -> None:
@@ -232,21 +348,31 @@ class RenderBridge(QObject):
             self._restart_timer.deleteLater()
             self._restart_timer = None
 
+    # ------------------------------------------------------------------
+    # File watcher with debounce
+    # ------------------------------------------------------------------
+
     def _setup_watcher(self) -> None:
-        self._stop_watcher()
         self._watch = QFileSystemWatcher(self)
-
-        # Default watch set: currently loaded shader files.
-        self._default_watch_files = []
-        for p in (self._shader_path, self._vert_path, self._geom_path):
-            if p and os.path.exists(p):
-                self._default_watch_files.append(p)
-
-        for p in set(self._default_watch_files + self._extra_watch_files):
-            self._watch.addPath(p)
+        if self._shader_path and os.path.exists(self._shader_path):
+            self._watch.addPath(self._shader_path)
+        if self._vert_path and os.path.exists(self._vert_path):
+            self._watch.addPath(self._vert_path)
+        if self._geom_path and os.path.exists(self._geom_path):
+            self._watch.addPath(self._geom_path)
         self._watch.fileChanged.connect(self._on_file_changed)
 
+        self._pending_changed_paths.clear()
+        self._watcher_debounce = QTimer(self)
+        self._watcher_debounce.setSingleShot(True)
+        self._watcher_debounce.setInterval(150)
+        self._watcher_debounce.timeout.connect(self._flush_changed_paths)
+
     def _stop_watcher(self) -> None:
+        if self._watcher_debounce:
+            self._watcher_debounce.stop()
+            self._watcher_debounce.deleteLater()
+            self._watcher_debounce = None
         if self._watch:
             try:
                 self._watch.fileChanged.disconnect(self._on_file_changed)
@@ -258,55 +384,28 @@ class RenderBridge(QObject):
             self._watch = None
 
     def _on_file_changed(self, path: str) -> None:
-        # Defer notification slightly to batch rapid successive changes.
-        self._pending_changed_path = path
-        if self._deferred_reload_timer is None:
-            self._deferred_reload_timer = QTimer(self)
-            self._deferred_reload_timer.setSingleShot(True)
-            self._deferred_reload_timer.timeout.connect(self._do_deferred_reload)
-        self._deferred_reload_timer.stop()
-        self._deferred_reload_timer.start(150)
+        self._pending_changed_paths.add(path)
+        if self._watcher_debounce:
+            self._watcher_debounce.start()
 
-    def _do_deferred_reload(self) -> None:
-        path = self._pending_changed_path
-        self._pending_changed_path = None
-        if path:
-            if self._watch and os.path.exists(path) and path not in self._watch.files():
-                self._watch.addPath(path)
-            self.file_changed.emit(path)
-        if self._shader_path and os.path.exists(self._shader_path):
-            with open(self._shader_path) as f:
-                self._shader_source = f.read()
+    def _flush_changed_paths(self) -> None:
+        paths = sorted(self._pending_changed_paths)
+        self._pending_changed_paths.clear()
+        for p in paths:
+            if self.is_running:
+                self.send_command(f"reload,{p}")
+                try:
+                    with open(p) as f:
+                        self._shader_source = f.read()
+                except OSError:
+                    pass
 
     def _parse_recording_progress(self, text: str) -> None:
-        import re
         for line in text.splitlines():
-            m = re.search(r"([#\.]+)\s+(\d+)%", line)
+            m = _re.search(r"([#\.]+)\s+(\d+)%", line)
             if m:
                 try:
                     pct = float(m.group(2)) / 100.0
                     self.recording_progress.emit(pct)
                 except ValueError:
                     pass
-
-    def _route_query_output(self, text: str) -> None:
-        if not self._pending_queries:
-            return
-        self._query_buffer += text
-        while self._pending_queries and self._query_buffer.count("// > ") >= 2:
-            before, _, rest = self._query_buffer.partition("// > ")
-            response, _, remainder = rest.partition("// > ")
-            self._query_buffer = remainder
-            callback = self._pending_queries.popleft()
-            callback(self._clean_query_response(response))
-
-    def _clean_query_response(self, text: str) -> str:
-        cleaned = []
-        for line in text.replace("\r", "\n").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped == "// >":
-                continue
-            if stripped.startswith("// >"):
-                stripped = stripped[4:].strip()
-            cleaned.append(stripped)
-        return "\n".join(cleaned).strip()

@@ -1,3 +1,4 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 """Centralized classification of arbitrary files passed to the GUI.
 
 This module takes a list of file or directory paths and decides what each
@@ -73,22 +74,29 @@ class ClassifiedItem:
 
 @dataclass
 class LoadPlan:
-    """Result of classifying one or more paths."""
+    """Result of classifying one or more paths.
+
+    All path lists store raw strings (never :class:`Path` objects) so that
+    stream-like values such as ``https://`` URLs, ``/dev/video0`` capture
+    devices, and wildcard sequences survive the classification round-trip
+    without being normalized by :class:`pathlib.Path` (which collapses
+    consecutive ``/`` to a single ``/`` and would corrupt URLs).
+    """
 
     items: list[ClassifiedItem] = field(default_factory=list)
-    sdf_project: Optional[Path] = None
-    project_config_path: Optional[Path] = None
-    sdf_scene: Optional[Path] = None
-    frag_path: Optional[Path] = None
-    vert_path: Optional[Path] = None
-    geom_path: Optional[Path] = None
-    mesh_paths: list[Path] = field(default_factory=list)
-    texture_paths: list[Path] = field(default_factory=list)
-    video_paths: list[Path] = field(default_factory=list)
-    csv_paths: list[Path] = field(default_factory=list)
-    cubemap_paths: list[Path] = field(default_factory=list)
-    shadertoy_candidates: list[Path] = field(default_factory=list)
-    unknown: list[Path] = field(default_factory=list)
+    sdf_project: Optional[str] = None
+    project_config_path: Optional[str] = None
+    sdf_scene: Optional[str] = None
+    frag_path: Optional[str] = None
+    vert_path: Optional[str] = None
+    geom_path: Optional[str] = None
+    mesh_paths: list[str] = field(default_factory=list)
+    texture_paths: list[str] = field(default_factory=list)
+    video_paths: list[str] = field(default_factory=list)
+    csv_paths: list[str] = field(default_factory=list)
+    cubemap_paths: list[str] = field(default_factory=list)
+    shadertoy_candidates: list[str] = field(default_factory=list)
+    unknown: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -151,9 +159,22 @@ def _quick_sniff(path: Path) -> dict:
     }
 
 
-def _classify_single(p: Path) -> ClassifiedItem:
+def _looks_like_stream(path: str) -> bool:
+    lower = path.lower()
+    return (
+        lower.startswith(("http://", "https://", "rtsp://", "rtmp://", "/dev/"))
+        or "*" in lower
+        or lower.startswith("http:/")  # Path() collapses // to /
+        or lower.startswith("https:/")
+        or lower.startswith("rtsp:/")
+        or lower.startswith("rtmp:/")
+    )
+
+
+def _classify_single(p: Path, *, force_stage: str | None = None) -> ClassifiedItem:
     """Classify a single path, falling back to content heuristics when needed."""
     suffix = p.suffix.lower()
+    raw = str(p)
 
     if p.is_dir():
         if is_sdf_project(p):
@@ -163,6 +184,8 @@ def _classify_single(p: Path) -> ClassifiedItem:
                 confidence=1.0,
                 reason="project.json + scene.glsl",
             )
+        # Non-SDF directories can be treated as streaming image sequences by glslViewer
+        # when used as a custom uniform asset. We leave that decision to the caller.
         return ClassifiedItem(
             path=p,
             kind=AssetKind.UNKNOWN,
@@ -186,11 +209,26 @@ def _classify_single(p: Path) -> ClassifiedItem:
         )
 
     if not p.exists():
+        if _looks_like_stream(raw):
+            return ClassifiedItem(
+                path=p,
+                kind=AssetKind.VIDEO_STREAM,
+                confidence=0.8,
+                reason="URL or stream-like path",
+            )
         return ClassifiedItem(
             path=p,
             kind=AssetKind.UNKNOWN,
             confidence=0.0,
             reason="path does not exist",
+        )
+
+    # Stream-like paths (URLs, /dev/*, wildcards) may have arbitrary extensions or
+    # none at all; check before extension-based dispatch.
+    if _looks_like_stream(raw):
+        return ClassifiedItem(
+            path=p, kind=AssetKind.VIDEO_STREAM, confidence=0.8,
+            reason="URL or stream-like path",
         )
 
     if suffix in FRAG_EXTS:
@@ -216,6 +254,11 @@ def _classify_single(p: Path) -> ClassifiedItem:
             reason=f"extension {suffix}",
         )
     if suffix in IMAGE_EXTS:
+        if suffix in (".hdr", ".exr"):
+            return ClassifiedItem(
+                path=p, kind=AssetKind.CUBEMAP, confidence=0.7,
+                reason=f"{suffix} environment candidate",
+            )
         return ClassifiedItem(
             path=p, kind=AssetKind.TEXTURE, confidence=1.0,
             reason=f"extension {suffix}",
@@ -232,6 +275,21 @@ def _classify_single(p: Path) -> ClassifiedItem:
         )
 
     if suffix in GLSL_EXTS:
+        # If a menu action explicitly requested a stage, force that interpretation
+        # for .glsl files even before content sniffing.
+        if force_stage == "fragment":
+            return ClassifiedItem(
+                path=p, kind=AssetKind.FRAGMENT_SHADER, confidence=0.95,
+                reason="forced fragment stage by menu",
+                stage_hint="fragment",
+            )
+        if force_stage == "vertex":
+            return ClassifiedItem(
+                path=p, kind=AssetKind.VERTEX_SHADER, confidence=0.95,
+                reason="forced vertex stage by menu",
+                stage_hint="vertex",
+            )
+
         info = _quick_sniff(p)
         if not info.get("readable", True):
             return ClassifiedItem(
@@ -306,113 +364,125 @@ def _classify_single(p: Path) -> ClassifiedItem:
     )
 
 
-def classify_paths(paths: Iterable[str | Path]) -> LoadPlan:
+def classify_paths(paths: Iterable[str | Path], *, force_stage: str | None = None) -> LoadPlan:
     """Classify a list of paths and produce a load plan.
 
     Pair detection (e.g. matching `<name>.frag` with `<name>.vert`) is
     handled automatically; everything else is forwarded as-is.
+
+    Stream-like inputs (URLs, ``/dev/*`` paths, wildcards) are stored as the
+    raw original string so that the round-trip to :class:`pathlib.Path`
+    does not corrupt them.
     """
     plan = LoadPlan()
     for raw in paths:
         if raw is None:
             continue
-        p = Path(raw)
-        item = _classify_single(p)
+        raw_str = str(raw)
+        p = Path(raw_str)
+        item = _classify_single(p, force_stage=force_stage)
         plan.items.append(item)
 
         if item.kind == AssetKind.SDF_PROJECT:
-            if plan.sdf_project is not None and plan.sdf_project != p:
+            if plan.sdf_project is not None and plan.sdf_project != raw_str:
                 plan.warnings.append(
-                    f"Multiple SDF projects provided; using {plan.sdf_project}, ignored {p}"
+                    f"Multiple SDF projects provided; using {plan.sdf_project}, ignored {raw_str}"
                 )
             else:
-                plan.sdf_project = p
-                plan.project_config_path = p if p.name == "project.json" else p / "project.json"
+                plan.sdf_project = raw_str
+                plan.project_config_path = (
+                    raw_str if p.name == "project.json" else str(p / "project.json")
+                )
 
         elif item.kind == AssetKind.SDF_SCENE:
-            if plan.sdf_scene is not None and plan.sdf_scene != p:
+            if plan.sdf_scene is not None and plan.sdf_scene != raw_str:
                 plan.warnings.append(
-                    f"Multiple SDF scenes provided; using {plan.sdf_scene}, ignored {p}"
+                    f"Multiple SDF scenes provided; using {plan.sdf_scene}, ignored {raw_str}"
                 )
             else:
-                plan.sdf_scene = p
+                plan.sdf_scene = raw_str
                 if is_sdf_project(p.parent):
-                    plan.sdf_project = p.parent
-                    plan.project_config_path = p.parent / "project.json"
+                    plan.sdf_project = str(p.parent)
+                    plan.project_config_path = str(p.parent / "project.json")
 
         elif item.kind == AssetKind.FRAGMENT_SHADER:
             if plan.frag_path is None:
-                plan.frag_path = p
+                plan.frag_path = raw_str
             else:
                 plan.warnings.append(
-                    f"Multiple fragment shaders; using {plan.frag_path}, ignored {p}"
+                    f"Multiple fragment shaders; using {plan.frag_path}, ignored {raw_str}"
                 )
 
         elif item.kind == AssetKind.VERTEX_SHADER:
             if plan.vert_path is None:
-                plan.vert_path = p
+                plan.vert_path = raw_str
 
         elif item.kind == AssetKind.MESH:
-            plan.mesh_paths.append(p)
+            plan.mesh_paths.append(raw_str)
 
         elif item.kind == AssetKind.CUBEMAP:
-            plan.cubemap_paths.append(p)
+            plan.cubemap_paths.append(raw_str)
 
         elif item.kind == AssetKind.TEXTURE:
-            plan.texture_paths.append(p)
+            plan.texture_paths.append(raw_str)
 
         elif item.kind == AssetKind.VIDEO_STREAM:
-            plan.video_paths.append(p)
+            plan.video_paths.append(raw_str)
 
         elif item.kind == AssetKind.UNIFORM_CSV:
             if p.stem.lower().startswith("camera"):
                 item.kind = AssetKind.CAMERA_CSV
-            plan.csv_paths.append(p)
+            plan.csv_paths.append(raw_str)
+
+        elif item.kind == AssetKind.UNKNOWN and p.is_dir():
+            # Non-SDF directories may be streaming image sequences.
+            plan.video_paths.append(raw_str)
 
         elif item.kind == AssetKind.SHADERTOY_LIKE:
-            plan.shadertoy_candidates.append(p)
+            plan.shadertoy_candidates.append(raw_str)
             if plan.frag_path is None:
-                plan.frag_path = p
+                plan.frag_path = raw_str
                 item.reason += " (used as fragment)"
 
         elif item.kind == AssetKind.GENERIC_GLSL:
             if plan.frag_path is None:
-                plan.frag_path = p
+                plan.frag_path = raw_str
                 if item.confidence < 0.9:
                     plan.warnings.append(
                         f"Treating {p.name} as a fragment shader (confidence: {item.confidence})"
                     )
             else:
                 plan.warnings.append(
-                    f"Multiple fragment shaders; using {plan.frag_path}, ignored {p}"
+                    f"Multiple fragment shaders; using {plan.frag_path}, ignored {raw_str}"
                 )
 
         elif item.kind == AssetKind.UNKNOWN:
-            plan.unknown.append(p)
+            plan.unknown.append(raw_str)
 
     if plan.frag_path and plan.vert_path is None:
         candidate = _find_sibling(plan.frag_path, VERT_EXTS)
         if candidate:
-            plan.vert_path = candidate
+            plan.vert_path = str(candidate)
             plan.warnings.append(
-                f"Auto-paired {candidate.name} as vertex shader"
+                f"Auto-paired {Path(candidate).name} as vertex shader"
             )
     if plan.vert_path and plan.frag_path is None:
         candidate = _find_sibling(plan.vert_path, FRAG_EXTS)
         if candidate:
-            plan.frag_path = candidate
+            plan.frag_path = str(candidate)
             plan.warnings.append(
-                f"Auto-paired {candidate.name} as fragment shader"
+                f"Auto-paired {Path(candidate).name} as fragment shader"
             )
 
     return plan
 
 
-def _find_sibling(path: Path, exts: Iterable[str]) -> Optional[Path]:
-    base = path.with_suffix("")
+def _find_sibling(path: str | Path, exts: Iterable[str]) -> Optional[Path]:
+    p = Path(path)
+    base = p.with_suffix("")
     for ext in exts:
         candidate = base.with_suffix(ext)
-        if candidate != path and candidate.is_file():
+        if candidate != p and candidate.is_file():
             return candidate
     return None
 
@@ -446,26 +516,26 @@ def build_session_from_plan(plan, base_session=None):
         base_session = RenderSessionConfig()
 
     if plan.frag_path is not None:
-        base_session.frag_path = str(plan.frag_path)
+        base_session.frag_path = plan.frag_path
     if plan.vert_path is not None:
-        base_session.vert_path = str(plan.vert_path)
+        base_session.vert_path = plan.vert_path
     if plan.geom_path is not None:
-        base_session.geom_path = str(plan.geom_path)
+        base_session.geom_path = plan.geom_path
     elif plan.mesh_paths:
-        base_session.geom_path = str(plan.mesh_paths[0])
+        base_session.geom_path = plan.mesh_paths[0]
 
     base_session.assets = list(base_session.assets)
 
     for mesh in plan.mesh_paths[1:]:
         base_session.assets.append(
-            AssetSpec(kind=ASSET_MODEL, name="", path=str(mesh))
+            AssetSpec(kind=ASSET_MODEL, name="", path=mesh)
         )
 
     used_names = {a.name for a in base_session.assets if a.name}
 
     for i, tex in enumerate(plan.texture_paths):
         base_session.assets.append(
-            AssetSpec(kind=ASSET_NAMED_TEXTURE, name=_safe_uniform_name(f"u_tex{i}", "u_tex0", used_names), path=str(tex))
+            AssetSpec(kind=ASSET_NAMED_TEXTURE, name=_safe_uniform_name(f"u_tex{i}", "u_tex0", used_names), path=tex)
         )
 
     for i, vid in enumerate(plan.video_paths):
@@ -473,24 +543,27 @@ def build_session_from_plan(plan, base_session=None):
             AssetSpec(
                 kind=ASSET_STREAM_TEXTURE,
                 name=_safe_uniform_name(f"u_texStream{i}", "u_texStream0", used_names),
-                path=str(vid),
+                path=vid,
             )
         )
 
     for cubemap in plan.cubemap_paths:
         base_session.assets.append(
-            AssetSpec(kind=ASSET_CUBEMAP_ENV, name="", path=str(cubemap))
+            AssetSpec(kind=ASSET_CUBEMAP_ENV, name="", path=cubemap)
         )
 
     for csv in plan.csv_paths:
-        stem = csv.stem.lower()
+        stem = Path(csv).stem.lower()
         if stem.startswith("camera"):
             base_session.assets.append(
-                AssetSpec(kind=ASSET_CAMERA_SEQUENCE, name="", path=str(csv))
+                AssetSpec(kind=ASSET_CAMERA_SEQUENCE, name="", path=csv)
             )
         else:
+            raw_name = _safe_uniform_name(stem, "u_values0", used_names)
+            if not raw_name.startswith("u_"):
+                raw_name = f"u_{raw_name}"
             base_session.assets.append(
-                AssetSpec(kind=ASSET_SEQUENCE_UNIFORM, name=_safe_uniform_name(stem, "u_values0", used_names), path=str(csv))
+                AssetSpec(kind=ASSET_SEQUENCE_UNIFORM, name=raw_name, path=csv)
             )
 
     return base_session

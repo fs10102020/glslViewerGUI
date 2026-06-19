@@ -9,14 +9,14 @@ all:
 	@echo "Targets: run, install, uninstall"
 
 run:
-	python3 main.py
+	cd glslViewerGUI && python3 main.py
 
 install:
 	install -d $(BINDIR) $(APPDIR) $(DATADIR)
-	cp -r ./* $(DATADIR)/
+	cp -r glslViewerGUI/* $(DATADIR)/
 	chmod +x $(DATADIR)/glslviewer-gui
 	ln -sf $(DATADIR)/glslviewer-gui $(BINDIR)/glslviewer-gui
-	cp glslviewer-gui.desktop $(APPDIR)/
+	cp glslViewerGUI/glslviewer-gui.desktop $(APPDIR)/
 	@echo "Installed to $(PREFIX)"
 
 uninstall:

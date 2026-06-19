@@ -1,6 +1,70 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 import re
 
 _VALID_NAME_RE = re.compile(r"^[A-Za-z_][\w]*$")
+
+# CLI single-dash flags consumed by glslViewer; custom uniform names used in
+# -<name> <path> CLI positions must avoid these. Note: this is a CLI-level
+# reservation. The runtime uniform wire (e.g. "u_audio,1.0") has different
+# constraints and must NOT be validated against this set.
+RESERVED_CLI_FLAGS = frozenset({
+    "a", "audio",
+    "c", "C", "sh",
+    "d", "display",
+    "D", "define",
+    "e", "E",
+    "f", "fullscreen",
+    "fps", "r",
+    "h", "height",
+    "headless",
+    "help",
+    "I", "include",
+    "l", "life-coding",
+    "lenticular",
+    "m", "mouse",
+    "major", "minor",
+    "msaa",
+    "noncurses",
+    "nocursor",
+    "nofloor",
+    "p", "port",
+    "q", "quilt", "quilt_tile",
+    "s", "size",
+    "ss", "screensaver",
+    "undecorated",
+    "v", "version",
+    "verbose",
+    "video",
+    "vFlip",
+    "vsync",
+    "w", "width",
+    "x",
+    "y",
+})
+
+# Names that collide with glslViewer's runtime command-prefix dispatch in
+# ``core/main.cpp:commandsRun``. A line like "fps,60" routed to the runtime
+# would be caught by the ``fps`` command handler and return the current FPS
+# instead of writing a uniform. This set is much smaller than the CLI flag
+# set and applies only to the ``build_uniform`` runtime wire.
+RESERVED_RUNTIME_PREFIXES = frozenset({
+    "fullFps", "vsync", "cursor", "camera", "max_mem_in_queue", "track",
+    "sequence", "sequence_uniform", "camera_sequence",
+    "update", "reload", "exit", "quit", "q", "wait",
+    "define", "undefine", "include_path",
+    "texture", "stream_texture", "audio_texture",
+    "cubemap_load", "skybox", "environment",
+    "load_model", "screenshot", "record", "frames", "secs",
+    "plane", "sphere", "icosphere", "cylinder", "pcl_plane", "pcl_sphere",
+    "debug", "error_screen", "buffers", "lights", "textures", "cubemaps",
+    "models", "plot", "axis", "bboxes", "floor", "grid", "sky",
+    "origin", "blend", "depth_test", "culling", "dynamic_shadows",
+    "floor_color", "model", "stream", "streams",
+    "frag", "vert", "dependencies", "files", "version", "about", "help",
+    "viewport", "mouse", "delta", "date", "screen_size",
+    "window_width", "window_height", "pixel_density", "fps",
+})
+
 
 def _validate_no_commas(value: str, label: str = "value") -> str:
     if "," in value:
@@ -13,6 +77,28 @@ def _validate_name(name: str, label: str = "name") -> str:
     _validate_no_commas(name, label)
     if not _VALID_NAME_RE.match(name):
         raise ValueError(f"Invalid {label}: {name!r}")
+    return name
+
+def _validate_not_reserved(name: str) -> str:
+    """Reject names that would collide with a glslViewer CLI flag (-<name>)."""
+    if name in RESERVED_CLI_FLAGS:
+        raise ValueError(
+            f"Name '{name}' collides with a glslViewer CLI flag"
+        )
+    return name
+
+def _validate_runtime_name(name: str) -> str:
+    """Validate a name for the *runtime* uniform wire (name,values…).
+
+    Only GLSL identifier rules and a small set of prefixes that would be
+    caught by glslViewer's command-prefix dispatch are rejected. The full
+    CLI flag set is irrelevant here because the wire is a CSV line, not argv.
+    """
+    _validate_name(name, "uniform name")
+    if name in RESERVED_RUNTIME_PREFIXES:
+        raise ValueError(
+            f"Uniform name '{name}' collides with a glslViewer runtime command prefix"
+        )
     return name
 
 def csv_command(*parts: object) -> str:
@@ -34,7 +120,7 @@ def build_undefine(name: str) -> str:
     return csv_command("undefine", name)
 
 def build_uniform(name: str, value) -> str:
-    _validate_name(name, "uniform name")
+    _validate_runtime_name(name)
     if isinstance(value, (list, tuple)):
         parts = ",".join(str(v) for v in value)
         return f"{name},{parts}"
@@ -42,6 +128,7 @@ def build_uniform(name: str, value) -> str:
 
 def build_texture(name: str, path: str, flip: bool = False) -> str:
     _validate_name(name, "texture name")
+    _validate_not_reserved(name)
     _validate_no_commas(path, "texture path")
     if flip:
         return csv_command("texture", name, path, "flip")
@@ -49,6 +136,7 @@ def build_texture(name: str, path: str, flip: bool = False) -> str:
 
 def build_stream_texture(name: str, path: str, webcam: bool = False, flip: bool = False) -> str:
     _validate_name(name, "stream name")
+    _validate_not_reserved(name)
     _validate_no_commas(path, "stream path")
     parts = ["stream_texture", name, path]
     # glslViewer's fourth argument is either "webcam" or "flip", never both.
@@ -60,10 +148,12 @@ def build_stream_texture(name: str, path: str, webcam: bool = False, flip: bool 
 
 def build_audio_texture(name: str, device_id: str = "-1") -> str:
     _validate_name(name, "audio name")
+    _validate_not_reserved(name)
     return csv_command("audio_texture", name, device_id)
 
 def build_cubemap_load(name: str, path: str, show: bool = False) -> str:
     _validate_name(name, "cubemap name")
+    _validate_not_reserved(name)
     _validate_no_commas(path, "cubemap path")
     if show:
         return csv_command("cubemap_load", name, path, "show")
@@ -78,9 +168,24 @@ def build_environment(path: str) -> str:
     return csv_command("environment", path)
 
 def build_sequence_uniform(name: str, csv_path: str) -> str:
-    _validate_name(name, "sequence uniform name")
-    _validate_no_commas(csv_path, "CSV path")
-    return csv_command("sequence_uniform", name, csv_path)
+    """Build a sequence-uniform command.
+
+    WARNING: glslViewer's command dispatch is prefix-based, so
+    ``sequence_uniform,...`` would be caught by the ``sequence`` command
+    handler first. Sequence uniforms should always be loaded through the CLI
+    ``-<name> <csv>`` path (see ``session_config.py:build_args``).
+    """
+    import warnings
+    warnings.warn(
+        "build_sequence_uniform is deprecated; sequence uniforms must be "
+        "loaded via the CLI -<name> <csv> path, not as a runtime command.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    raise NotImplementedError(
+        "build_sequence_uniform is intentionally not supported as a runtime "
+        "command (prefix collision with 'sequence'). Use the CLI -<name> <csv> path."
+    )
 
 def build_camera_sequence(csv_path: str) -> str:
     _validate_no_commas(csv_path, "CSV path")
@@ -232,7 +337,10 @@ def build_buffers(on: bool) -> str:
     return csv_command("buffers", "on" if on else "off")
 
 def build_textures_display(on: bool) -> str:
-    return csv_command("textures", "on" if on else "off")
+    raise NotImplementedError(
+        "build_textures_display is intentionally not supported — glslViewer "
+        "has no runtime 'textures,on/off' command."
+    )
 
 def build_floor(on: bool) -> str:
     return csv_command("floor", "on" if on else "off")
@@ -300,9 +408,6 @@ def build_floor_color(r: float, g: float, b: float) -> str:
 
 def build_model_position(name: str, x: float, y: float, z: float) -> str:
     return csv_command("model", name, x, y, z)
-
-def build_update() -> str:
-    return csv_command("update")
 
 def build_mouse_capture() -> str:
     return csv_command("mouse", "capture")
@@ -386,15 +491,8 @@ def build_icosphere(resolution: str = "") -> str:
         return csv_command("icosphere", resolution)
     return csv_command("icosphere")
 
-def build_cylinder(res_radius: str = "", res_height: str = "", cap: str = "") -> str:
-    parts = ["cylinder"]
-    if res_radius:
-        parts.append(res_radius)
-        if res_height:
-            parts.append(res_height)
-            if cap:
-                parts.append(cap)
-    return csv_command(*parts)
+def build_cylinder(res_radius: int = 16, res_height: int = 3, cap: int = 1) -> str:
+    return csv_command("cylinder", res_radius, res_height, cap)
 
 def build_max_mem_in_queue(bytes_val: int) -> str:
     return csv_command("max_mem_in_queue", bytes_val)

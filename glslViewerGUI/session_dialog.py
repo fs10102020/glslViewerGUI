@@ -1,3 +1,4 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 import os
 
 from PySide6.QtCore import Qt
@@ -15,7 +16,7 @@ class SessionDialog(QDialog):
     def __init__(self, config: RenderSessionConfig, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Session Settings")
-        self.resize(500, 450)
+        self.resize(560, 560)
         self._config = config
 
         layout = QVBoxLayout(self)
@@ -26,6 +27,7 @@ class SessionDialog(QDialog):
         self._build_window_tab()
         self._build_renderer_tab()
         self._build_paths_tab()
+        self._build_advanced_tab()
 
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -116,6 +118,10 @@ class SessionDialog(QDialog):
         self._osc_port.setSpecialValueText("None")
         form.addRow("OSC Port:", self._osc_port)
 
+        self._life_coding = QCheckBox("Life-coding mode (always-on-top billboard)")
+        self._life_coding.setChecked(self._config.life_coding)
+        form.addRow(self._life_coding)
+
         self._tabs.addTab(tab, "Renderer")
 
     # ------------------------------------------------------------------
@@ -163,6 +169,63 @@ class SessionDialog(QDialog):
         self._tabs.addTab(tab, "Paths")
 
     # ------------------------------------------------------------------
+    def _build_advanced_tab(self) -> None:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        form = QFormLayout()
+
+        self._gl_major = QSpinBox()
+        self._gl_major.setRange(0, 9)
+        self._gl_major.setValue(self._config.gl_major or 0)
+        self._gl_major.setSpecialValueText("Default")
+        form.addRow("GL Major:", self._gl_major)
+
+        self._gl_minor = QSpinBox()
+        self._gl_minor.setRange(0, 9)
+        self._gl_minor.setValue(self._config.gl_minor or 0)
+        self._gl_minor.setSpecialValueText("Default")
+        form.addRow("GL Minor:", self._gl_minor)
+
+        self._quilt = QSpinBox()
+        self._quilt.setRange(-1, 15)
+        self._quilt.setValue(self._config.quilt if self._config.quilt is not None else -1)
+        self._quilt.setSpecialValueText("None")
+        form.addRow("HoloPlay Quilt:", self._quilt)
+
+        self._quilt_tile = QSpinBox()
+        self._quilt_tile.setRange(-1, 1024)
+        self._quilt_tile.setValue(self._config.quilt_tile if self._config.quilt_tile is not None else -1)
+        self._quilt_tile.setSpecialValueText("None")
+        form.addRow("HoloPlay Quilt Tile:", self._quilt_tile)
+
+        self._lenticular_path = QLineEdit(self._config.lenticular_path)
+        form.addRow("Lenticular JSON:", self._lenticular_path)
+
+        self._display_device = QLineEdit(self._config.display_device)
+        self._display_device.setPlaceholderText("/dev/dri/card1")
+        form.addRow("GBM Display Device:", self._display_device)
+
+        self._mouse_device = QLineEdit(self._config.mouse_device)
+        self._mouse_device.setPlaceholderText("/dev/input/mice")
+        form.addRow("Mouse Device:", self._mouse_device)
+
+        self._video_device = QLineEdit(self._config.video_device)
+        self._video_device.setPlaceholderText("0")
+        form.addRow("Startup Video Device:", self._video_device)
+
+        self._audio_device = QLineEdit(self._config.audio_device)
+        self._audio_device.setPlaceholderText("-1")
+        form.addRow("Startup Audio Device:", self._audio_device)
+
+        self._cubemap_sh = QCheckBox("Use -sh spherical harmonics for environment (hidden)")
+        self._cubemap_sh.setChecked(self._config.cubemap_sh)
+        form.addRow(self._cubemap_sh)
+
+        layout.addLayout(form)
+        layout.addStretch()
+        self._tabs.addTab(tab, "Advanced")
+
+    # ------------------------------------------------------------------
     def _on_add_include(self) -> None:
         d = QFileDialog.getExistingDirectory(
             self, "Add Include Folder",
@@ -204,6 +267,20 @@ class SessionDialog(QDialog):
         self._config.verbose = self._verbose.isChecked()
         self._config.vflip = self._vflip.isChecked()
         self._config.osc_port = self._osc_port.value() or None
+        self._config.life_coding = self._life_coding.isChecked()
+
+        self._config.gl_major = self._gl_major.value() or None
+        self._config.gl_minor = self._gl_minor.value() or None
+        quilt = self._quilt.value()
+        self._config.quilt = quilt if quilt >= 0 else None
+        quilt_tile = self._quilt_tile.value()
+        self._config.quilt_tile = quilt_tile if quilt_tile >= 0 else None
+        self._config.lenticular_path = self._lenticular_path.text().strip()
+        self._config.display_device = self._display_device.text().strip()
+        self._config.mouse_device = self._mouse_device.text().strip()
+        self._config.video_device = self._video_device.text().strip()
+        self._config.audio_device = self._audio_device.text().strip()
+        self._config.cubemap_sh = self._cubemap_sh.isChecked()
 
         self._config.include_dirs = [
             self._inc_list.item(i).text()

@@ -1,3 +1,4 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 """SDF project model and shader composer.
 
 An SDF project is a small directory containing:
@@ -295,6 +296,7 @@ class SdfShaderComposer:
 
         parts: list[str] = []
         parts.append("#version 330 core")
+        parts.append(f"#define SDF_INTEGRATOR_{cfg.integrator.upper()}")
         parts.append(self._load_template("common.glsl"))
         parts.append(self._load_template("camera.glsl"))
         parts.append(self._load_template("marcher.glsl"))

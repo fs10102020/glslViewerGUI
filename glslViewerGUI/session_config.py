@@ -1,3 +1,4 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 import os
 from dataclasses import dataclass, field
 
@@ -69,7 +70,6 @@ ASSET_AUTO_TEXTURE = "auto_texture"
 
 # Kinds that can be passed directly on the glslViewer command line.
 CLI_ASSET_KINDS = frozenset({
-    ASSET_AUTO_TEXTURE,
     ASSET_NAMED_TEXTURE,
     ASSET_CUBEMAP_SHOW,
     ASSET_CUBEMAP_ENV,
@@ -172,6 +172,19 @@ class RenderSessionConfig:
     window_size: int | None = None
     osc_port: int | None = None
 
+    # Advanced / platform-specific glslViewer flags
+    gl_major: int | None = None
+    gl_minor: int | None = None
+    life_coding: bool = False
+    quilt: int | None = None
+    quilt_tile: int | None = None
+    lenticular_path: str = ""
+    display_device: str = ""  # GBM display port, e.g. /dev/dri/card1
+    mouse_device: str = ""  # non-GLFW mouse port
+    video_device: str = ""  # --video <device>
+    audio_device: str = ""  # --audio [device_id]
+    cubemap_sh: bool = False  # -sh envmap mode (hidden SH, no visible skybox)
+
     def build_args(self) -> list[str]:
         args = ["--noncurses"]
         if self.headless:
@@ -210,10 +223,35 @@ class RenderSessionConfig:
         elif self.fps > 0:
             args.extend(["-fps", str(self.fps)])
 
+        if self.gl_major is not None:
+            args.extend(["--major", str(self.gl_major)])
+        if self.gl_minor is not None:
+            args.extend(["--minor", str(self.gl_minor)])
+        if self.life_coding:
+            args.append("--life-coding")
+        if self.quilt is not None:
+            args.extend(["--quilt", str(self.quilt)])
+        if self.quilt_tile is not None:
+            args.extend(["--quilt_tile", str(self.quilt_tile)])
+        if self.lenticular_path:
+            args.extend(["--lenticular", self.lenticular_path])
+        if self.display_device:
+            args.extend(["--display", self.display_device])
+        if self.mouse_device:
+            args.extend(["--mouse", self.mouse_device])
+        if self.video_device:
+            args.extend(["--video", self.video_device])
+
         for d in self.include_dirs:
             args.extend(["-I", d])
 
         for key, val in self.defines.items():
+            # SDF integrator defines are emitted by the SDF shader composer
+            # itself (``#define SDF_INTEGRATOR_<MODE>`` at the top of the
+            # generated frag). Putting them on the argv as well would
+            # inject a duplicate into every model and the canvas shader.
+            if key.startswith("SDF_INTEGRATOR_"):
+                continue
             if val:
                 args.extend(["-e", build_define(key, val)])
             else:
@@ -221,15 +259,23 @@ class RenderSessionConfig:
 
         for a in self.assets:
             if a.kind == "auto_texture":
+                # glslViewer has no formal --auto-texture argv handler, but bare
+                # paths are auto-named by the renderer's texture loader.
                 args.append(a.path)
             elif a.kind == "named_texture":
                 args.extend([f"-{a.name}", a.path])
             elif a.kind == "cubemap_show":
                 args.extend(["-C", a.path])
             elif a.kind == "cubemap_env":
-                args.extend(["-c", a.path])
+                if self.cubemap_sh:
+                    args.extend(["-sh", a.path])
+                else:
+                    args.extend(["-c", a.path])
             elif a.kind == "sequence_uniform":
                 args.extend([f"-{a.name}", a.path])
+
+        if self.audio_device:
+            args.extend(["--audio", self.audio_device])
 
         if self.frag_path:
             args.append(self.frag_path)
@@ -272,6 +318,17 @@ class RenderSessionConfig:
             "window_height": self.window_height,
             "window_size": self.window_size,
             "osc_port": self.osc_port,
+            "gl_major": self.gl_major,
+            "gl_minor": self.gl_minor,
+            "life_coding": self.life_coding,
+            "quilt": self.quilt,
+            "quilt_tile": self.quilt_tile,
+            "lenticular_path": self.lenticular_path,
+            "display_device": self.display_device,
+            "mouse_device": self.mouse_device,
+            "video_device": self.video_device,
+            "audio_device": self.audio_device,
+            "cubemap_sh": self.cubemap_sh,
         }
 
     @classmethod
@@ -304,6 +361,17 @@ class RenderSessionConfig:
             window_height=data.get("window_height"),
             window_size=data.get("window_size"),
             osc_port=data.get("osc_port"),
+            gl_major=data.get("gl_major"),
+            gl_minor=data.get("gl_minor"),
+            life_coding=data.get("life_coding", False),
+            quilt=data.get("quilt"),
+            quilt_tile=data.get("quilt_tile"),
+            lenticular_path=data.get("lenticular_path", ""),
+            display_device=data.get("display_device", ""),
+            mouse_device=data.get("mouse_device", ""),
+            video_device=data.get("video_device", ""),
+            audio_device=data.get("audio_device", ""),
+            cubemap_sh=data.get("cubemap_sh", False),
         )
 
     def to_program(self) -> ShaderProgramSpec:

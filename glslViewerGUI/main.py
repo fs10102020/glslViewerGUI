@@ -1,3 +1,4 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 import sys
 import os
 
@@ -15,7 +16,7 @@ def main():
     app.setOrganizationName("glslViewer")
 
     settings = QSettings("glslViewer", "GlslViewerGUI")
-    saved_theme = settings.value("theme", "dark")
+    saved_theme = settings.value("theme", "system")
     if isinstance(saved_theme, str):
         apply_theme(app, saved_theme)
 

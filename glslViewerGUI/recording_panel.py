@@ -1,3 +1,4 @@
+# NEVER use PyQt / PyQt6 — this codebase uses PySide6 ONLY.
 import os
 
 from PySide6.QtCore import Qt, Signal
@@ -12,6 +13,7 @@ class RecordingPanel(QWidget):
     screenshot_requested = Signal(str)
     sequence_requested = Signal(str, float, float, float)
     record_requested = Signal(str, float, float, float)
+    frames_requested = Signal(str, int, int, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -21,7 +23,6 @@ class RecordingPanel(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(12)
 
-        # Screenshot
         ss_group = QGroupBox("Screenshot")
         ss_layout = QHBoxLayout(ss_group)
         self._ss_btn = QPushButton("Save Screenshot\u2026")
@@ -29,7 +30,6 @@ class RecordingPanel(QWidget):
         ss_layout.addWidget(self._ss_btn)
         layout.addWidget(ss_group)
 
-        # Sequence
         seq_group = QGroupBox("PNG Sequence")
         seq_layout = QVBoxLayout(seq_group)
 
@@ -72,7 +72,6 @@ class RecordingPanel(QWidget):
         seq_layout.addWidget(self._seq_start)
         layout.addWidget(seq_group)
 
-        # Video
         vid_group = QGroupBox("Video (MP4 / GIF)")
         vid_layout = QVBoxLayout(vid_group)
 
@@ -115,7 +114,44 @@ class RecordingPanel(QWidget):
         vid_layout.addWidget(self._vid_start)
         layout.addWidget(vid_group)
 
-        # Progress
+        frm_group = QGroupBox("Frame Sequence")
+        frm_layout = QVBoxLayout(frm_group)
+
+        frm_prefix_row = QHBoxLayout()
+        frm_prefix_row.addWidget(QLabel("Prefix:"))
+        self._frm_prefix_label = QLabel("frame_")
+        self._frm_prefix_label.setStyleSheet("font-weight: bold;")
+        frm_prefix_row.addWidget(self._frm_prefix_label)
+        self._frm_dir_btn = QPushButton("Choose Directory\u2026")
+        self._frm_dir_btn.clicked.connect(self._on_choose_frm_dir)
+        frm_prefix_row.addWidget(self._frm_dir_btn)
+        frm_layout.addLayout(frm_prefix_row)
+
+        frm_times = QHBoxLayout()
+        frm_times.addWidget(QLabel("From:"))
+        self._frm_from = QSpinBox()
+        self._frm_from.setRange(0, 999999)
+        self._frm_from.setValue(0)
+        frm_times.addWidget(self._frm_from)
+
+        frm_times.addWidget(QLabel("To:"))
+        self._frm_to = QSpinBox()
+        self._frm_to.setRange(0, 999999)
+        self._frm_to.setValue(100)
+        frm_times.addWidget(self._frm_to)
+
+        frm_times.addWidget(QLabel("FPS:"))
+        self._frm_fps = QSpinBox()
+        self._frm_fps.setRange(1, 240)
+        self._frm_fps.setValue(24)
+        frm_times.addWidget(self._frm_fps)
+        frm_layout.addLayout(frm_times)
+
+        self._frm_start = QPushButton("Start Frames")
+        self._frm_start.clicked.connect(self._on_start_frames)
+        frm_layout.addWidget(self._frm_start)
+        layout.addWidget(frm_group)
+
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
@@ -127,24 +163,26 @@ class RecordingPanel(QWidget):
         layout.addWidget(self._status)
 
         layout.addStretch()
+
         self._seq_dir: str | None = None
         self._vid_file: str | None = None
+        self._frm_dir: str | None = None
 
     def set_progress(self, pct: float) -> None:
         self._progress.setValue(int(pct * 100))
         self._status.setText(f"Recording\u2026 {int(pct * 100)}%")
-        if pct >= 1.0:
-            self.set_busy(False)
 
     def reset_progress(self) -> None:
         self._progress.setValue(0)
         self._status.setText("Ready")
         self._seq_start.setEnabled(True)
         self._vid_start.setEnabled(True)
+        self._frm_start.setEnabled(True)
 
     def set_busy(self, busy: bool) -> None:
         self._seq_start.setEnabled(not busy)
         self._vid_start.setEnabled(not busy)
+        self._frm_start.setEnabled(not busy)
 
     def _on_screenshot(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -167,9 +205,6 @@ class RecordingPanel(QWidget):
     def _on_start_sequence(self) -> None:
         if not self._seq_dir:
             QMessageBox.warning(self, "Sequence", "Please choose an output directory first.")
-            return
-        if self._seq_from.value() >= self._seq_to.value():
-            QMessageBox.warning(self, "Sequence", "The start time must be before the end time.")
             return
         prefix = os.path.join(self._seq_dir, "frame_")
         self.set_busy(True)
@@ -194,13 +229,32 @@ class RecordingPanel(QWidget):
         if not self._vid_file:
             QMessageBox.warning(self, "Video", "Please choose an output file first.")
             return
-        if self._vid_from.value() >= self._vid_to.value():
-            QMessageBox.warning(self, "Video", "The start time must be before the end time.")
-            return
         self.set_busy(True)
         self.record_requested.emit(
             self._vid_file,
             self._vid_from.value(),
             self._vid_to.value(),
             float(self._vid_fps.value()),
+        )
+
+    def _on_choose_frm_dir(self) -> None:
+        d = QFileDialog.getExistingDirectory(
+            self, "Choose Frames Directory", "",
+            options=QFileDialog.Option.DontUseNativeDialog
+        )
+        if d:
+            self._frm_dir = d
+            self._frm_prefix_label.setText(os.path.join(d, "frame_"))
+
+    def _on_start_frames(self) -> None:
+        if not self._frm_dir:
+            QMessageBox.warning(self, "Frames", "Please choose an output directory first.")
+            return
+        prefix = os.path.join(self._frm_dir, "frame_")
+        self.set_busy(True)
+        self.frames_requested.emit(
+            prefix,
+            self._frm_from.value(),
+            self._frm_to.value(),
+            float(self._frm_fps.value()),
         )
